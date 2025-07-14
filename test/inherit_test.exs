@@ -15,6 +15,14 @@ defmodule InheritTest do
     use Foo, [
       b: 2
     ]
+
+    defmacro __using__(fields) do
+      quote do
+        unquote(super(fields))
+
+        def used?, do: true
+      end
+    end
   end
 
   defmodule Baz do
@@ -29,5 +37,9 @@ defmodule InheritTest do
 
     baz = %Baz{}
     assert Baz.add(baz.a, baz.b) == 4
+  end
+
+  test "can override __using__" do
+    assert Baz.used?()
   end
 end

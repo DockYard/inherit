@@ -84,6 +84,7 @@ defmodule Inherit do
           Inherit.from unquote(__MODULE__), unquote(fields)
         end
       end
+      defoverridable __using__: 1
       defstruct unquote(fields)
       unquote_splicing(delegate_calls)
       defoverridable unquote(overridable_list)
@@ -109,6 +110,7 @@ defmodule Inherit do
           Inherit.from unquote(__MODULE__), unquote(fields)
         end
       end
+      defoverridable __using__: 1
       defstruct unquote(fields)
     end
   end
