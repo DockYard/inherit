@@ -71,23 +71,34 @@ defmodule Inherit do
 
     delegate_calls = Enum.map(functions, fn {name, args} ->
       quote location: :keep do
-        defdelegate(unquote({name, [], args}), to: unquote(module))
+        def unquote(name)(unquote_splicing(args)) do
+          unquote(module).unquote(name)(unquote_splicing(args))
+        end
       end
     end)
 
     overridable_list = Enum.map(functions, fn {name, args} -> {name, length(args)} end)
 
     quote location: :keep do
+      defstruct unquote(Macro.escape(fields))
+      unquote_splicing(delegate_calls)
+      defoverridable unquote(overridable_list)
+
+      def __functions__ do
+        {unquote(Macro.escape(functions)), unquote(module)}
+      end
+
+      def __delegate_calls__ do
+        {unquote(Macro.escape(delegate_calls)), unquote(module)}
+      end
+
       defmacro __using__(fields) do
         quote do
           require Inherit
-          Inherit.from unquote(__MODULE__), unquote(fields)
+          Inherit.from unquote(__MODULE__), unquote(Macro.escape(fields))
         end
       end
       defoverridable __using__: 1
-      defstruct unquote(fields)
-      unquote_splicing(delegate_calls)
-      defoverridable unquote(overridable_list)
     end
   end
 
@@ -107,14 +118,16 @@ defmodule Inherit do
       defmacro __using__(fields) do
         quote do
           require Inherit
-          Inherit.from unquote(__MODULE__), unquote(fields)
+          Inherit.from unquote(__MODULE__), unquote(Macro.escape(fields))
         end
       end
       defoverridable __using__: 1
-      defstruct unquote(fields)
+      defstruct unquote(Macro.escape(fields))
     end
   end
  
+  defp build_args(0),
+    do: []
   defp build_args(arity) do
     Enum.map(1..arity, &({:"var_#{&1}", [], Elixir}))
   end
