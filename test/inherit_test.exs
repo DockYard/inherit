@@ -1,8 +1,8 @@
 defmodule InheritTest do
+  require Inherit
   use ExUnit.Case
 
   defmodule Foo do
-    use GenServer
     use Inherit, [
       assigns: %{},
       list: [],
@@ -12,11 +12,10 @@ defmodule InheritTest do
     defmacro __using__(fields) do
       quote do
         use GenServer
-        unquote(super(fields))
-
+        unquote(Inherit.setup(__CALLER__, __MODULE__, fields))
         def used?, do: true
 
-        def identity do
+        def module do
           __MODULE__
         end
       end
@@ -34,9 +33,14 @@ defmodule InheritTest do
     end
   end
 
+
   defmodule Bar do
     use Foo, [
-      b: 2
+      b: 2,
+      c: %{
+        a: 1,
+        b: {:a, [], [1, 2]}
+      }
     ]
 
     def allowed do
@@ -60,10 +64,16 @@ defmodule InheritTest do
     ]
   end
 
+  test "Foo" do
+    assert %Foo{}.a == 1
+  end
+
   test "Bar inherits fields and public functions from Foo" do
     %Bar{} = bar = %Bar{}
     assert Bar.add(bar.a, bar.b) == 3
+  end
 
+  test "Baz inherits from Bar which inherits from Foo" do
     %Baz{} = baz = %Baz{}
     assert Baz.add(baz.a, baz.b) == 4
   end
@@ -74,5 +84,11 @@ defmodule InheritTest do
 
   test "0 arity functions supported" do
     assert Baz.allowed() == [z: 1, y: 2]
+  end
+
+  test "overridden __using__ is inherited with proper module scope" do
+    assert Qux.module() == Qux
+    assert Baz.module() == Baz
+    assert Bar.module() == Bar
   end
 end
