@@ -45,6 +45,31 @@ defmodule Inherit do
       "Hello, I'm John and I'm 30 years old"
   """
 
+  defmacro parent do
+    quote location: :keep do
+      parent(unquote(__CALLER__.module))
+    end
+  end
+
+  defmacro parent(module) do
+    quote location: :keep do
+      case Code.ensure_compiled(unquote(module)) do
+        {:module, _} ->
+          # Module is compiled, get from module attributes
+          unquote(module).__info__(:attributes)
+          |> Keyword.get(:__parent__)
+          |> case do
+            [parent] -> parent
+            nil -> nil
+          end
+        {:error, _} ->
+          if !is_nil(unquote(module)) do
+            Module.get_attribute(unquote(module), :__parent__)
+          end
+      end
+    end
+  end
+
   @doc """
   Creates an inheritable module that can be used by other modules.
 
@@ -56,48 +81,89 @@ defmodule Inherit do
   - `module` - The module to inherit from
   - `fields` - A keyword list of additional fields to add to the struct
   """
-  defmacro from(module, fields) do
-    module = Macro.expand(module, __CALLER__)
+  defmacro from(parent_module_ast, fields) do
+    parent_module = Macro.expand(parent_module_ast, __CALLER__)
     {fields, _} = Macro.expand(fields, __CALLER__) |> Code.eval_quoted()
-    ancestors = get_ancestors(module.__parent__())
-    Module.put_attribute(__CALLER__.module, :__parent__, module)
+    ancestor_modules = get_ancestors(parent(parent_module))
 
-    functions =
-      module.__info__(:functions)
-      |> Enum.reject(&(Atom.to_string(elem(&1, 0)) =~ "__"))
-      |> Enum.map(fn({name, arity}) -> {name, build_args(arity)} end)
+    case Code.ensure_compiled(__CALLER__.module) do
+      {:module, _} -> nil
+      {:error, _} ->
+        if !is_nil(__CALLER__.module) do
+          Module.put_attribute(__CALLER__.module, :__parent__, parent_module)
+        end
+    end
 
-    fields = module.__info__(:struct)
+    fields = parent_module.__info__(:struct)
       |> Enum.map(&({&1.field, &1.default}))
       |> Keyword.merge(fields)
 
-    delegate_calls = Enum.map(functions, fn {name, args} ->
-      quote location: :keep do
-        def unquote(name)(unquote_splicing(args)) do
-          unquote(module).unquote(name)(unquote_splicing(args))
+    quoted_ancestors =
+      Enum.reverse(ancestor_modules ++ [parent_module])
+      |> Enum.reduce([], fn(ancestor_module, quoted_ancestors) ->
+        overridden =
+          ancestor_module.__info__(:attributes)
+          |> Keyword.get_values(:__overridden__)
+          |> Enum.into([], fn([{name, arity}]) -> {name, arity} end)
+
+        functions =
+          ancestor_module.__info__(:functions)
+          |> Enum.reduce([], fn({name, arity}, functions) ->
+            if !(Atom.to_string(name) =~ "__" || arity not in Keyword.get_values(overridden, name)) do
+              [{name, build_args(arity)} | functions]
+            else
+              functions 
+            end
+          end)
+
+        delegate_calls = Enum.map(functions, fn {name, args} ->
+          quote location: :keep do
+            def unquote(name)(unquote_splicing(args)) do
+              unquote(ancestor_module).unquote(name)(unquote_splicing(args))
+            end
+          end
+        end)
+
+        quoted = quote location: :keep do
+          unquote_splicing(delegate_calls)
+          defoverridable unquote(overridden)
+
+          unquote(
+            if ancestor_module != parent_module do
+              quote location: :keep do
+                use unquote(ancestor_module), unquote(Macro.escape(fields))
+              end
+            end
+          )
         end
-      end
-    end)
 
-    overridable_list = Enum.map(functions, fn {name, args} -> {name, length(args)} end)
+        [quoted | quoted_ancestors]
+      end)
 
-    quoted_for = Enum.map(ancestors, fn ancestor ->
-      quote do
-        use unquote(ancestor), unquote(Macro.escape(fields))
+    quoted = quote location: :keep do
+      use Inherit, unquote(Macro.escape(fields))
+
+      unquote_splicing(quoted_ancestors)
+    end
+
+    quoted
+  end
+
+  @doc false
+  defmacro defoverridable(keywords_or_behaviour) do
+    Macro.expand(keywords_or_behaviour, __CALLER__)
+    |> Code.eval_quoted()
+    |> elem(0)
+    |> Enum.each(fn {name, arity} ->
+      overridden = Module.get_attribute(__CALLER__.module, :__overridden__)
+      if arity not in Keyword.get_values(overridden, name) do
+        Module.put_attribute(__CALLER__.module, :__overridden__, {name, arity})
+        Module.get_attribute(__CALLER__.module, :__overridden__)
       end
     end)
 
     quote location: :keep do
-      use Inherit, unquote(Macro.escape(fields))
-
-      def __parent__ do
-        unquote(module)
-      end
-
-      unquote_splicing(delegate_calls)
-      defoverridable unquote(overridable_list)
-
-      unquote_splicing(quoted_for)
+      Kernel.defoverridable unquote(keywords_or_behaviour)
     end
   end
 
@@ -111,19 +177,33 @@ defmodule Inherit do
   - `fields` - A keyword list defining the struct fields and their default values
   """
   defmacro __using__(fields) do
-    {fields, _} = Macro.expand(fields, __CALLER__) |> Code.eval_quoted()
-    quote do
-      defstruct unquote(Macro.escape(fields))
-      def __parent__,
-        do: nil
-      defoverridable __parent__: 0
+    case Code.ensure_compiled(__CALLER__.module) do
+      {:module, _} -> nil
+      {:error, _} ->
+        if !is_nil(__CALLER__.module) do
+          Module.register_attribute(__CALLER__.module, :__parent__, persist: true)
+        end
+    end
+
+    Module.register_attribute(__CALLER__.module, :__overridden__, persist: true, accumulate: true)
+
+    quote location: :keep do
+      import Kernel, except: [
+        defoverridable: 1
+      ]
+      require Inherit
+      import Inherit, only: [
+        parent: 0,
+        parent: 1,
+        defoverridable: 1
+      ]
+
+      defstruct unquote(fields)
 
       defmacro __using__(fields) do
-        if !Module.get_attribute(__CALLER__.module, :__parent__) do
-          quote do
-            require Inherit
-            Inherit.from(unquote(__MODULE__), unquote(fields))
-          end
+        quote do
+          require Inherit
+          Inherit.setup(unquote(__MODULE__), unquote(fields))
         end
       end
       defoverridable __using__: 1
@@ -131,14 +211,10 @@ defmodule Inherit do
   end
 
   @doc false
-  def setup(caller, module, fields) do
-    if !Module.get_attribute(caller.module, :__parent__) do
-      quote do
-        require Inherit
+  defmacro setup(module, fields) do
+    if !parent(__CALLER__.module) do
+      quote location: :keep do
         Inherit.from(unquote(module), unquote(fields))
-      end
-    else
-      quote do
       end
     end
   end
@@ -153,5 +229,5 @@ defmodule Inherit do
   defp get_ancestors(nil, ancestors),
     do: Enum.reverse(ancestors)
   defp get_ancestors(module, ancestors),
-    do: get_ancestors(module.__parent__(), [module | ancestors])
+    do: get_ancestors(parent(module), [module | ancestors])
 end

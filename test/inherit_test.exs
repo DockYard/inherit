@@ -1,8 +1,23 @@
+defmodule I do
+  def q(quoted, opts \\ []) do
+    IO.puts(opts[:label])
+    Macro.to_string(quoted) |> IO.puts()
+
+    quoted
+  end
+end
+
 defmodule InheritTest do
-  require Inherit
   use ExUnit.Case
 
   defmodule Foo do
+    use GenServer
+
+    def foo do
+      :test
+    end
+    defoverridable foo: 0
+
     use Inherit, [
       assigns: %{},
       list: [],
@@ -10,41 +25,73 @@ defmodule InheritTest do
     ]
 
     defmacro __using__(fields) do
-      quote do
+      quote location: :keep do
         use GenServer
-        unquote(Inherit.setup(__CALLER__, __MODULE__, fields))
+        require Inherit
+        Inherit.setup(unquote(__MODULE__), unquote(Macro.escape(fields)))
+
         def used?, do: true
+        defoverridable used?: 0
 
         def module do
           __MODULE__
         end
+
+        def incr(val) do
+          super(val)  + 1
+        end
+        defoverridable incr: 1
       end
     end
 
+    @impl true
+    def handle_call(:get, _from, state) do
+      {:reply, state, state}
+    end
+
+    @impl true
     def init(_) do
       :ok
     end
+    defoverridable init: 1
+
+    def incr(val) do
+      val  + 1
+    end
+    defoverridable incr: 1
 
     def allowed,
       do: []
+    defoverridable allowed: 0
 
     def add(a, b) do
       a + b
     end
+    defoverridable add: 2
   end
-
 
   defmodule Bar do
     use Foo, [
-      b: 2,
-      c: %{
+      b: 2, c: %{
         a: 1,
         b: {:a, [], [1, 2]}
       }
     ]
 
     def allowed do
-      super() ++ [z: 1]
+      parent().allowed() ++ [z: 1]
+    end
+
+    def incr(val) do
+      parent().incr(val) + 1
+    end
+
+    def handle_call(:get, _from, state) do
+      {:reply, state, state}
+    end
+
+    def handle_call(msg, from, state) do
+      parent().handle_call(msg, from, state)
     end
   end
 
@@ -54,7 +101,11 @@ defmodule InheritTest do
     ]
 
     def allowed do
-      super() ++ [y: 2]
+      parent().allowed() ++ [y: 2]
+    end
+
+    def incr(val) do
+      parent().incr(val) + 1
     end
   end
 
@@ -62,6 +113,10 @@ defmodule InheritTest do
     use Baz, [
       c: 4
     ]
+
+    def incr(val) do
+      parent().incr(val) + 1
+    end
   end
 
   test "Foo" do
@@ -90,5 +145,9 @@ defmodule InheritTest do
     assert Qux.module() == Qux
     assert Baz.module() == Baz
     assert Bar.module() == Bar
+  end
+
+  test "properly implements ineritance order of functions" do
+    assert Qux.incr(1) == 5
   end
 end
