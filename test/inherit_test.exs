@@ -13,11 +13,6 @@ defmodule InheritTest do
   defmodule Foo do
     use GenServer
 
-    def foo do
-      :test
-    end
-    defoverridable foo: 0
-
     use Inherit, [
       assigns: %{},
       list: [],
