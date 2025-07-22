@@ -1,11 +1,22 @@
 defmodule Inherit do
   @moduledoc """
-  Inherit provides a way to create pseudo-inheritance in Elixir by allowing modules
-  to inherit struct fields and delegate function calls from other modules.
+  Inherit provides pseudo-inheritance in Elixir by allowing modules to inherit
+  struct fields, delegate function calls, and override behaviors from parent modules.
 
-  ## Usage
+  ## Features
 
-  To make a module inheritable, use `Inherit`:
+  - **Struct inheritance**: Child modules inherit all fields from parent modules
+  - **Function delegation**: Public functions from parent modules are automatically delegated
+  - **Function overriding**: Parent functions marked with `defoverridable` can be overridden by child modules
+  - **Custom `__using__` inheritance**: Parent modules can define custom `__using__` macros that are inherited
+  - **Parent module access**: Use `parent()` to access the parent module and call parent functions
+  - **Super calls**: Use `super()` to call the original implementation of overridden functions
+  - **Deep inheritance chains**: Support for multiple levels of inheritance
+  - **GenServer integration**: Works seamlessly with GenServer and other OTP behaviors
+
+  ## Basic Usage
+
+  ### Making a module inheritable
 
       defmodule Parent do
         use Inherit, [
@@ -14,35 +25,142 @@ defmodule Inherit do
         ]
 
         def some_function(value) do
-          # function implementation
+          value + 1
         end
+        defoverridable some_function: 1  # Child modules can override this
+        
+        def another_function do
+          "parent implementation"  
+        end
+        # No defoverridable - child modules cannot override this
       end
 
-  To inherit from a module:
+  ### Inheriting from a module
 
       defmodule Child do
         use Parent, [
           field3: "additional_field"
         ]
 
-        # Child now has field1, field2, and field3
-        # Child can call Parent.some_function/1 directly
+        # Override a parent function (only works if parent used defoverridable)
+        def some_function(value) do
+          super(value) + 10  # Calls Parent.some_function/1 and adds 10
+        end
+        defoverridable some_function: 1
+
+        # Access parent module directly  
+        def call_parent do
+          parent().another_function()
+        end
+        
+        # This would compile with a warning but never be called:
+        # def another_function, do: "child implementation"  # Parent didn't use defoverridable!
       end
+
+  ## Advanced Usage
+
+  ### Custom `__using__` macros
+
+  Parent modules can define their own `__using__` macros that will be inherited:
+
+      defmodule BaseServer do
+        use GenServer
+        use Inherit, [state: %{}]
+
+        defmacro __using__(fields) do
+          quote do
+            use GenServer
+            require Inherit
+            Inherit.setup(unquote(__MODULE__), unquote(fields))
+
+            def start_link(opts \\\\ []) do
+              GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+            end
+            defoverridable start_link: 1
+          end
+        end
+
+        @impl true
+        def init(opts) do
+          {:ok, struct(__MODULE__, opts)}
+        end
+      end
+
+  ### Deep inheritance chains
+
+      defmodule GrandParent do
+        use Inherit, [a: 1]
+        def value(x), do: x
+        defoverridable value: 1  # Must mark as overridable for children to override
+      end
+
+      defmodule Parent do
+        use GrandParent, [b: 2]
+        def value(x), do: super(x) + 10
+        defoverridable value: 1  # Mark as overridable for further children
+      end
+
+      defmodule Child do
+        use Parent, [c: 3]
+        def value(x), do: super(x) + 100
+        defoverridable value: 1
+      end
+
+      # Child.value(5) => 115 (5 + 10 + 100)
+
+  ## Important: Function Overriding Rules
+  
+  **Parent modules control which functions can be overridden by child modules:**
+  
+  - Functions marked with `defoverridable` in the parent can be overridden by children
+  - Functions NOT marked with `defoverridable` cannot be overridden (attempts will compile with warnings but never execute)
+  - Child modules must also use `defoverridable` when overriding to allow further inheritance
+  
+      defmodule Parent do
+        use Inherit, [field: 1]
+        
+        def can_override, do: "parent"
+        defoverridable can_override: 0
+        
+        def cannot_override, do: "parent only"  # No defoverridable!
+      end
+      
+      defmodule Child do
+        use Parent, []
+        
+        def can_override, do: "child"     # This works - parent used defoverridable
+        defoverridable can_override: 0
+        
+        def cannot_override, do: "child"  # Compiles with warning, never called!
+      end
+      
+      # Child.can_override() => "child"
+      # Child.cannot_override() => "parent only" (parent's version always used)
+
+  ## Helper Functions
+
+  - `parent()` - Returns the immediate parent module
+  - `parent(module)` - Returns the parent of the specified module
+  - `super(args...)` - Calls the parent implementation of the current function
 
   ## Examples
 
       iex> defmodule Person do
       ...>   use Inherit, [name: "", age: 0]
       ...>   def greet(person) do
-      ...>     "Hello, I'm \#{person.name} and I'm \#{person.age} years old"
+      ...>     "Hello, I'm \#{person.name}"
       ...>   end
       ...> end
       iex> defmodule Employee do
-      ...>   use Person, [salary: 0]
+      ...>   use Person, [salary: 0, department: ""]
+      ...>   def greet(employee) do
+      ...>     super(employee) <> " from \#{employee.department}"
+      ...>   end
+      ...>   defoverridable greet: 1
       ...> end
-      iex> emp = %Employee{name: "John", age: 30, salary: 50000}
+      iex> emp = %Employee{name: "John", department: "Engineering"}
       iex> Employee.greet(emp)
-      "Hello, I'm John and I'm 30 years old"
+      "Hello, I'm John from Engineering"
   """
 
   defmacro parent do
