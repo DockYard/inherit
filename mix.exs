@@ -11,11 +11,15 @@ defmodule Inherit.MixProject do
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       package: package(),
+      elixirc_paths: elixirc_paths(Mix.env()),
       description: description(),
       deps: deps(),
       docs: docs()
     ]
   end
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
 
   defp docs do
     [

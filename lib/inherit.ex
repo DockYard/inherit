@@ -171,19 +171,16 @@ defmodule Inherit do
 
   defmacro parent(module) do
     quote location: :keep do
-      case Code.ensure_compiled(unquote(module)) do
-        {:module, _} ->
-          # Module is compiled, get from module attributes
-          unquote(module).__info__(:attributes)
+      case :code.ensure_loaded(unquote(module)) do
+        {:module, module} ->
+          module.__info__(:attributes)
           |> Keyword.get(:__parent__)
           |> case do
             [parent] -> parent
             nil -> nil
           end
         {:error, _} ->
-          if !is_nil(unquote(module)) do
-            Module.get_attribute(unquote(module), :__parent__)
-          end
+          Module.get_attribute(unquote(module), :__parent__)
       end
     end
   end
@@ -204,12 +201,10 @@ defmodule Inherit do
     {fields, _} = Macro.expand(fields, __CALLER__) |> Code.eval_quoted()
     ancestor_modules = get_ancestors(parent(parent_module))
 
-    case Code.ensure_compiled(__CALLER__.module) do
+    case :code.ensure_loaded(__CALLER__.module) do
       {:module, _} -> nil
       {:error, _} ->
-        if !is_nil(__CALLER__.module) do
-          Module.put_attribute(__CALLER__.module, :__parent__, parent_module)
-        end
+        Module.put_attribute(__CALLER__.module, :__parent__, parent_module)
     end
 
     fields = parent_module.__info__(:struct)
@@ -295,12 +290,13 @@ defmodule Inherit do
   - `fields` - A keyword list defining the struct fields and their default values
   """
   defmacro __using__(fields) do
-    case Code.ensure_compiled(__CALLER__.module) do
+    # caller = __CALLER__
+    # require IEx
+    # IEx.pry()
+    case :code.ensure_loaded(__CALLER__.module) do
       {:module, _} -> nil
       {:error, _} ->
-        if !is_nil(__CALLER__.module) do
-          Module.register_attribute(__CALLER__.module, :__parent__, persist: true)
-        end
+        Module.register_attribute(__CALLER__.module, :__parent__, persist: true)
     end
 
     Module.register_attribute(__CALLER__.module, :__overridden__, persist: true, accumulate: true)
