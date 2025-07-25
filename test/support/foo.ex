@@ -31,6 +31,7 @@ defmodule Foo do
   def handle_call(:get, _from, state) do
     {:reply, state, state}
   end
+  defoverridable handle_call: 3
 
   @impl true
   def init(_) do
@@ -50,6 +51,5 @@ defmodule Foo do
   def add(a, b) do
     a + b
   end
-  defoverridable add: 2
 end
 

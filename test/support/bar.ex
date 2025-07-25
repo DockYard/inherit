@@ -9,6 +9,7 @@ defmodule Bar do
   def allowed do
     super() ++ [z: 1]
   end
+  defoverridable allowed: 0
 
   def incr(val) do
     parent().incr(val) + 1
@@ -23,4 +24,3 @@ defmodule Bar do
     parent().handle_call(msg, from, state)
   end
 end
-

@@ -10,4 +10,6 @@ defmodule Baz do
   def incr(val) do
     parent().incr(val) + 1
   end
+
+  def used?, do: false
 end
