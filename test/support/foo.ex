@@ -19,6 +19,7 @@ defmodule Foo do
       def module do
         __MODULE__
       end
+      defoverridable module: 0
 
       def incr(val) do
         super(val)  + 1

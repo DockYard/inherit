@@ -197,6 +197,47 @@ defmodule Inherit do
   - `fields` - A keyword list of additional fields to add to the struct
   """
   defmacro from(parent, fields) do
+    Module.put_attribute(__CALLER__.module, :"$inherit:parent", parent)
+
+    ancestors_quoted =
+      Inherit.get_inheritable_functions(parent)
+      |> Enum.map(fn({ancestor_module, functions}) ->
+        def_quoted = Enum.map(functions, fn({name, meta}) ->
+          args = Inherit.build_args(meta.arity)
+          
+          quote do
+            def unquote(name)(unquote_splicing(args)) do
+              apply(unquote(ancestor_module), unquote(name), [unquote_splicing(args)])
+            end
+            Inherit.update_function_defs(unquote(name), unquote(meta.arity), %{delegate: true})
+          end
+        end)
+
+        overridable = Enum.reduce(functions, [], fn
+          {name, %{overridable: true} = meta}, acc ->
+            [{name, meta.arity}| acc]
+          _other, acc -> acc
+        end)
+
+        defoverridable_quoted = quote do
+          defoverridable unquote(overridable)
+        end
+
+        use_quoted = if ancestor_module != parent do
+          quote do
+            use unquote(ancestor_module), unquote(Macro.escape(fields))
+          end
+        else
+          []
+        end
+
+        quote do
+          unquote_splicing(def_quoted)
+          unquote(defoverridable_quoted)
+          unquote(use_quoted)
+        end
+      end)
+
     quote location: :keep do
       fields = unquote(parent).__info__(:struct)
         |> Enum.map(&({&1.field, &1.default}))
@@ -204,16 +245,7 @@ defmodule Inherit do
 
       use Inherit, fields
 
-      for {ancestor_module, functions} <- Inherit.get_inheritable_functions(unquote(parent)) do
-        for {name, args} <- functions do
-          Inherit.def(name, args) do
-            apply(ancestor_module, name, args)
-          end
-          Inherit.update_function_defs(name, length(List.wrap(args)), %{delegate: true})
-        end
-
-        use ancestor_module, fields
-      end
+      unquote_splicing(ancestors_quoted)
     end
   end
 
@@ -227,7 +259,7 @@ defmodule Inherit do
           _other -> false
         end)
 
-      [{ancestor, functions}]
+      {ancestor, functions}
     end)
   end
 
@@ -237,17 +269,20 @@ defmodule Inherit do
       Kernel.defoverridable(unquote(keywords_or_behaviour))
 
       Enum.each(unquote(keywords_or_behaviour), fn({name, arity}) ->
-        Inherit.update_function_defs(name, arity, %{overridden: true})
+        Inherit.update_function_defs(name, arity, %{overridable: true})
       end)
     end
   end
 
   defmacro def({name, _meta, args} = call, expr\\ nil) do
-    arity = length(List.wrap(args))
+    arity = case args do
+      args when is_list(args) -> length(args)
+      _other -> 0
+    end
 
     quote location: :keep do
       Kernel.def(unquote(call), unquote(expr))
-      Inherit.update_function_defs(unquote(name), unquote(arity), %{overridden: false, delegate: false})
+      Inherit.update_function_defs(unquote(name), unquote(arity), %{overridable: false, delegate: false})
     end
   end
 
@@ -263,7 +298,7 @@ defmodule Inherit do
 
       {name, meta} =
         case function_idx do
-          nil -> {name, %{arity: arity, overridden: false, delegate: false}}
+          nil -> {name, %{arity: arity, overridable: false, delegate: false}}
           idx -> Enum.at(functions, idx)
         end
 
