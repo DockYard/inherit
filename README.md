@@ -29,6 +29,7 @@ defmodule Person do
   def greet(person) do
     "Hello, I'm #{person.name} and I'm #{person.age} years old"
   end
+  defoverridable greet: 1
 
   def adult?(person) do
     person.age >= 18
@@ -65,7 +66,8 @@ defmodule Employee do
   end
   
   # This would compile with warning but never be called:
-  # def name_length(employee), do: 999  # Parent didn't use defoverridable!
+  def name_length(employee),
+    do: 999  # Parent didn't use defoverridable!
 end
 ```
 
@@ -117,6 +119,7 @@ defmodule BaseServer do
       def start_link(opts \\ []) do
         GenServer.start_link(__MODULE__, opts, name: __MODULE__)
       end
+      defwithhold start_link: 1
       defoverridable start_link: 1
     end
   end
@@ -162,7 +165,34 @@ end
 
 - `parent()` - Returns the immediate parent module
 - `parent(module)` - Returns the parent of the specified module  
-- `super(args...)` - Calls the parent implementation of the current function
+- `super(args...)` - Calls the parent implementation when overriding inherited functions
+- `defwithhold` - Prevents specified functions from being inherited by child modules
+
+### Preventing Inheritance with `defwithhold`
+
+By default, all public functions are inherited by child modules. Use `defwithhold` to prevent specific functions from being inherited:
+
+```elixir
+defmodule Parent do
+  use Inherit, [field: 1]
+
+  def inherited_function do
+    "This will be inherited"
+  end
+
+  def not_inherited_function do
+    "This will not be inherited"
+  end
+  defwithhold not_inherited_function: 0
+end
+
+defmodule Child do
+  use Parent, []
+  
+  # Child.inherited_function() works automatically
+  # Child.not_inherited_function() raises UndefinedFunctionError
+end
+```
 
 ## Function Overriding Rules
 
@@ -200,13 +230,62 @@ Child.cannot_override() # => "parent only" (parent's version always used)
 
 ## How it works
 
-1. **Parent module setup**: When you `use Inherit`, the module becomes inheritable and defines its own struct
-2. **Inheritance**: When you `use ParentModule`, the child module:
-   - Inherits all struct fields from the parent
-   - Adds any additional fields specified
-   - Delegates all public functions from the parent module
-   - Makes inherited functions overridable with custom `defoverridable` macro
-   - Inherits any custom `__using__` behavior from the parent
+The inheritance system creates a tree structure where modules can inherit from parent modules and define their own functions. Here's an example inheritance tree:
+
+```mermaid
+flowchart TD
+    GrandParent["GrandParent<br/>use Inherit, [field: 1]<br/>defines: grandparent_func()"] 
+    
+    Parent["Parent<br/>use GrandParent, [field: 2]<br/>inherits: grandparent_func()<br/>defines: parent_func()"]
+    
+    Uncle["Uncle<br/>use GrandParent, [field: 3]<br/>inherits: grandparent_func()<br/>defines: uncle_func()"]
+    
+    Child["Child<br/>use Parent, [field: 4]<br/>inherits: grandparent_func(), parent_func()<br/>defines: child_func()"]
+    
+    GrandParent --> Parent
+    GrandParent --> Uncle
+    Parent --> Child
+    
+    style GrandParent fill:#FF9800,stroke:#E65100,stroke-width:3px,color:#fff
+    style Parent fill:#2196F3,stroke:#0D47A1,stroke-width:3px,color:#fff
+    style Uncle fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
+    style Child fill:#9C27B0,stroke:#4A148C,stroke-width:3px,color:#fff
+```
+
+**Inheritance tree explanation:**
+
+- **GrandParent**: Root module that uses `Inherit` and defines `grandparent_func()`
+- **Parent**: Inherits from GrandParent, gets `grandparent_func()` automatically, defines `parent_func()`
+- **Uncle**: Also inherits from GrandParent (sibling to Parent), gets `grandparent_func()`, defines `uncle_func()`
+- **Child**: Inherits from Parent, gets both `grandparent_func()` and `parent_func()` automatically, defines `child_func()`
+
+**Function availability:**
+```elixir
+# Child has access to all functions in the inheritance chain
+Child.grandparent_func()  # Delegated from GrandParent
+Child.parent_func()       # Delegated from Parent  
+Child.child_func()        # Defined locally
+
+# Uncle only has access to GrandParent functions
+Uncle.grandparent_func()  # Delegated from GrandParent
+Uncle.uncle_func()        # Defined locally
+
+# Parent has access to GrandParent functions
+Parent.grandparent_func() # Delegated from GrandParent
+Parent.parent_func()      # Defined locally
+```
+
+**Key inheritance principles:**
+- **Deep inheritance**: Child inherits transitively through the entire chain (GrandParent → Parent → Child)
+- **Sibling inheritance**: Uncle and Parent both inherit from GrandParent but are independent of each other
+- **Function delegation**: All ancestor functions are automatically available through delegation
+- **Custom behavior**: Each module can define its own functions while inheriting from ancestors
+
+This ensures that:
+- All ancestor functions are available through delegation
+- Custom `__using__` macros from ancestors are inherited
+- Direct parent `__using__` is not duplicated
+- The inheritance chain is properly established
 
 ## Installation
 

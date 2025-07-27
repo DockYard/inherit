@@ -141,7 +141,8 @@ defmodule Inherit do
 
   - `parent()` - Returns the immediate parent module
   - `parent(module)` - Returns the parent of the specified module
-  - `super(args...)` - Calls the parent implementation of the current function
+  - `super(args...)` - Calls the parent implementation when overriding inherited functions
+  - `defwithhold` - Prevents specified functions from being inherited by child modules
 
   ## Examples
 
@@ -185,17 +186,7 @@ defmodule Inherit do
     end
   end
 
-  @doc """
-  Creates an inheritable module that can be used by other modules.
-
-  This macro sets up a module to be inherited by defining a `__using__/1` macro
-  that delegates function calls and merges struct fields.
-
-  ## Parameters
-
-  - `module` - The module to inherit from
-  - `fields` - A keyword list of additional fields to add to the struct
-  """
+  @doc false
   defmacro from(parent, fields) do
     Module.put_attribute(__CALLER__.module, :"$inherit:parent", parent)
 
@@ -205,7 +196,7 @@ defmodule Inherit do
         def_quoted = Enum.map(functions, fn({name, meta}) ->
           args = Inherit.build_args(meta.arity)
           
-          quote do
+          quote location: :keep do
             def unquote(name)(unquote_splicing(args)) do
               apply(unquote(ancestor_module), unquote(name), [unquote_splicing(args)])
             end
@@ -219,19 +210,19 @@ defmodule Inherit do
           _other, acc -> acc
         end)
 
-        defoverridable_quoted = quote do
+        defoverridable_quoted = quote location: :keep do
           defoverridable unquote(overridable)
         end
 
         use_quoted = if ancestor_module != parent do
-          quote do
+          quote location: :keep do
             use unquote(ancestor_module), unquote(Macro.escape(fields))
           end
         else
           []
         end
 
-        quote do
+        quote location: :keep do
           unquote_splicing(def_quoted)
           unquote(defoverridable_quoted)
           unquote(use_quoted)
@@ -251,7 +242,7 @@ defmodule Inherit do
 
   def get_inheritable_functions(module) do
     get_ancestors(module)
-    |> Enum.map(fn(ancestor) ->
+    |> Enum.reduce([],  fn(ancestor, ancestor_functions) ->
       functions =
         ancestor.__info__(:attributes) |> Keyword.get(:"$inherit:functions", [])
         |> Enum.filter(fn
@@ -259,8 +250,56 @@ defmodule Inherit do
           _other -> false
         end)
 
-      {ancestor, functions}
+      [{ancestor, functions} | ancestor_functions]
     end)
+  end
+
+  @doc """
+  Prevents specified functions from being marked as inheritable by child modules.
+
+  This macro removes functions from the inheritance mechanism, ensuring they will
+  not be automatically delegated to child modules. Functions marked with 
+  `defwithhold` must be defined independently by each module that needs them.
+
+  ## Parameters
+
+  - `keywords_or_behaviour` - A keyword list of `{function_name, arity}` pairs
+    specifying which functions should not be inheritable
+
+  ## Example
+
+      defmodule Parent do
+        use Inherit, [field: 1]
+
+        def inheritable_function do
+          "This will be inherited"
+        end
+
+        def non_inheritable_function do
+          "This will not be inherited"
+        end
+        defwithhold non_inheritable_function: 0
+      end
+
+      defmodule Child do
+        use Parent, []
+        
+        # Child automatically inherits inheritable_function/0
+        # Child does NOT inherit non_inheritable_function/0
+        # Must define non_inheritable_function/0 independently if needed
+      end
+
+  ## Technical Implementation
+
+  `defwithhold` removes function entries from the module's `$inherit:functions`
+  attribute, excluding them from the automatic delegation process during inheritance.
+  """
+  defmacro defwithhold(keywords_or_behaviour) do
+    quote location: :keep do
+      Enum.each(unquote(keywords_or_behaviour), fn({name, arity}) ->
+        Inherit.remove_function_defs(name, arity)
+      end)
+    end
   end
 
   @doc false
@@ -274,42 +313,75 @@ defmodule Inherit do
     end
   end
 
-  defmacro def({name, _meta, args} = call, expr\\ nil) do
-    arity = case args do
-      args when is_list(args) -> length(args)
-      _other -> 0
+  defmacro def(call, expr \\ nil) do
+    quoted_def = quote location: :keep do
+      Kernel.def(unquote(call), unquote(expr))
+    end
+
+    {name, args} = case call do
+      {:when, _, [{name, _, args} | _]} -> {name, args}
+      {name, _meta, args} -> {name, args}
+    end
+
+    arity_range = case args do
+      args when is_list(args) ->
+        arity = length(args)
+        defaults = Enum.count(args, fn
+          {:\\, _meta, _args } -> true
+          _other -> false
+        end)
+        (arity - defaults)..arity
+      _other -> 0..0
     end
 
     quote location: :keep do
-      Kernel.def(unquote(call), unquote(expr))
-      Inherit.update_function_defs(unquote(name), unquote(arity), %{overridable: false, delegate: false})
+      unquote(quoted_def)
+      Enum.each(unquote(Macro.escape(arity_range)), fn(arity) ->
+        Inherit.update_function_defs(unquote(name), arity, %{overridable: false, delegate: false})
+      end)
+    end
+  end
+
+  @doc false
+  defmacro remove_function_defs(name, arity) do
+    quote location: :keep, bind_quoted: [name: name, arity: arity] do
+      if functions = Module.get_attribute(__MODULE__, :"$inherit:functions") do
+        functions =
+          Enum.reject(functions, fn
+            {^name, %{arity: ^arity}} -> true
+            _other -> false
+          end)
+
+        Module.put_attribute(__MODULE__, :"$inherit:functions", functions)
+      end
     end
   end
 
   @doc false
   defmacro update_function_defs(name, arity, update_meta) do
     quote location: :keep, bind_quoted: [name: name, arity: arity, update_meta: update_meta] do
-      functions = Module.get_attribute(__MODULE__, :"$inherit:functions")
-      function_idx =
-        Enum.find_index(functions, fn
-          {^name, %{arity: ^arity}} -> true
-          _other -> false
-        end)
+      if functions = Module.get_attribute(__MODULE__, :"$inherit:functions") do
+        function_idx =
+          Enum.find_index(functions, fn
+            {^name, %{arity: ^arity}} -> true
+            _other -> false
+          end)
 
-      {name, meta} =
-        case function_idx do
-          nil -> {name, %{arity: arity, overridable: false, delegate: false}}
-          idx -> Enum.at(functions, idx)
+        {name, meta} =
+          case function_idx do
+            nil -> {name, %{arity: arity, overridable: false, delegate: false}}
+            idx -> Enum.at(functions, idx)
+          end
+
+        meta = Map.merge(meta, update_meta)
+
+        functions = case function_idx do
+          nil -> List.insert_at(functions, -1, {name, meta})
+          idx -> List.replace_at(functions, idx, {name, meta})
         end
 
-      meta = Map.merge(meta, update_meta)
-
-      functions = case function_idx do
-        nil -> List.insert_at(functions, -1, {name, meta})
-        idx -> List.replace_at(functions, idx, {name, meta})
+        Module.put_attribute(__MODULE__, :"$inherit:functions", functions)
       end
-
-      Module.put_attribute(__MODULE__, :"$inherit:functions", functions)
     end
   end
 
@@ -337,7 +409,8 @@ defmodule Inherit do
         parent: 0,
         parent: 1,
         def: 2,
-        defoverridable: 1
+        defoverridable: 1,
+        defwithhold: 1
       ]
 
       defstruct unquote(fields)

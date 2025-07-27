@@ -9,7 +9,7 @@ defmodule InheritTest do
     %Bar{} = bar = %Bar{}
     assert Bar.add(bar.a, bar.b) == 3
   end
-  #
+
   test "Baz inherits from Foo" do
     %Baz{} = baz = %Baz{}
     assert Baz.add(baz.a, baz.b) == 4
@@ -17,7 +17,7 @@ defmodule InheritTest do
 
   test "Qux inherits from Foo" do
     %Qux{} = qux = %Qux{}
-    assert Qux.add(qux.a, qux.b) == 4
+    assert Qux.add(qux.a, qux.b) == 5
   end
 
   test "can override __using__" do
@@ -36,6 +36,14 @@ defmodule InheritTest do
   end
 
   test "properly implements ineritance order of functions" do
-    assert Qux.incr(1) == 5
+    assert Qux.incr(1) == 4
+  end
+
+  test "Empty is empty" do
+    %Empty{} = _empty = %Empty{}
+  end
+
+  test "can inherit from an empty parent" do
+    %Other{} = _other = %Other{}
   end
 end
