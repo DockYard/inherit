@@ -165,13 +165,13 @@ defmodule Inherit do
   """
 
   defmacro parent do
-    quote location: :keep do
+    quote do
       parent(unquote(__CALLER__.module))
     end
   end
 
   defmacro parent(module) do
-    quote location: :keep do
+    quote do
       case :code.ensure_loaded(unquote(module)) do
         {:module, module} ->
           module.__info__(:attributes)
@@ -196,7 +196,7 @@ defmodule Inherit do
         def_quoted = Enum.map(functions, fn({name, meta}) ->
           args = Inherit.build_args(meta.arity)
           
-          quote location: :keep do
+          quote do
             def unquote(name)(unquote_splicing(args)) do
               apply(unquote(ancestor_module), unquote(name), [unquote_splicing(args)])
             end
@@ -210,26 +210,26 @@ defmodule Inherit do
           _other, acc -> acc
         end)
 
-        defoverridable_quoted = quote location: :keep do
+        defoverridable_quoted = quote do
           defoverridable unquote(overridable)
         end
 
         use_quoted = if ancestor_module != parent do
-          quote location: :keep do
+          quote do
             use unquote(ancestor_module), unquote(Macro.escape(fields))
           end
         else
           []
         end
 
-        quote location: :keep do
+        quote do
           unquote_splicing(def_quoted)
           unquote(defoverridable_quoted)
           unquote(use_quoted)
         end
       end)
 
-    quote location: :keep do
+    quote do
       fields = unquote(parent).__info__(:struct)
         |> Enum.map(&({&1.field, &1.default}))
         |> Keyword.merge(unquote(fields))
@@ -295,7 +295,7 @@ defmodule Inherit do
   attribute, excluding them from the automatic delegation process during inheritance.
   """
   defmacro defwithhold(keywords_or_behaviour) do
-    quote location: :keep do
+    quote do
       Enum.each(unquote(keywords_or_behaviour), fn({name, arity}) ->
         Inherit.remove_function_defs(name, arity)
       end)
@@ -304,7 +304,7 @@ defmodule Inherit do
 
   @doc false
   defmacro defoverridable(keywords_or_behaviour) do
-    quote location: :keep do
+    quote do
       Kernel.defoverridable(unquote(keywords_or_behaviour))
 
       Enum.each(unquote(keywords_or_behaviour), fn({name, arity}) ->
@@ -314,7 +314,7 @@ defmodule Inherit do
   end
 
   defmacro def(call, expr \\ nil) do
-    quoted_def = quote location: :keep do
+    quoted_def = quote do
       Kernel.def(unquote(call), unquote(expr))
     end
 
@@ -334,7 +334,7 @@ defmodule Inherit do
       _other -> 0..0
     end
 
-    quote location: :keep do
+    quote do
       unquote(quoted_def)
       Enum.each(unquote(Macro.escape(arity_range)), fn(arity) ->
         Inherit.update_function_defs(unquote(name), arity, %{overridable: false, delegate: false})
@@ -344,7 +344,7 @@ defmodule Inherit do
 
   @doc false
   defmacro remove_function_defs(name, arity) do
-    quote location: :keep, bind_quoted: [name: name, arity: arity] do
+    quote bind_quoted: [name: name, arity: arity] do
       if functions = Module.get_attribute(__MODULE__, :"$inherit:functions") do
         functions =
           Enum.reject(functions, fn
@@ -359,7 +359,7 @@ defmodule Inherit do
 
   @doc false
   defmacro update_function_defs(name, arity, update_meta) do
-    quote location: :keep, bind_quoted: [name: name, arity: arity, update_meta: update_meta] do
+    quote bind_quoted: [name: name, arity: arity, update_meta: update_meta] do
       if functions = Module.get_attribute(__MODULE__, :"$inherit:functions") do
         function_idx =
           Enum.find_index(functions, fn
@@ -395,7 +395,7 @@ defmodule Inherit do
   - `fields` - A keyword list defining the struct fields and their default values
   """
   defmacro __using__(fields) do
-    quote location: :keep do
+    quote do
       Module.register_attribute(__MODULE__, :"$inherit:parent", persist: true)
       Module.register_attribute(__MODULE__, :"$inherit:functions", persist: true)
       Module.put_attribute(__MODULE__, :"$inherit:functions", [])
@@ -416,7 +416,7 @@ defmodule Inherit do
       defstruct unquote(fields)
 
       defmacro __using__(fields) do
-        quote location: :keep do
+        quote do
           require Inherit
           Inherit.setup(unquote(__MODULE__), unquote(fields))
         end
@@ -428,7 +428,7 @@ defmodule Inherit do
   @doc false
   defmacro setup(module, fields) do
     if !parent(__CALLER__.module) do
-      quote location: :keep do
+      quote do
         Inherit.from(unquote(module), unquote(fields))
       end
     end

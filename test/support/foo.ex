@@ -18,6 +18,12 @@ defmodule Foo do
       def used?, do: true
       defoverridable used?: 0
 
+      def init(opts \\ []) do
+        :ignore
+      end
+      defwithhold init: 0, init: 1
+      defoverridable init: 0, init: 1
+
       def module do
         __MODULE__
       end
@@ -45,10 +51,11 @@ defmodule Foo do
   defoverridable handle_call: 3
 
   @impl true
-  def init(_) do
+  def init(_opts \\ []) do
     :ignore
   end
-  defoverridable init: 1
+  defwithhold init: 0, init: 1
+  defoverridable init: 0, init: 1
 
   def incr(val, by \\ 1) do
     val  + by
