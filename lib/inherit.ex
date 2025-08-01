@@ -446,4 +446,20 @@ defmodule Inherit do
     do: Enum.reverse(ancestors)
   defp get_ancestors(module, ancestors),
     do: get_ancestors(parent(module), [module | ancestors])
+
+  def debug(quoted, caller) do
+    body = Macro.expand(quoted, caller) |> Macro.to_string()
+    <<"Elixir.", name::binary>> = Atom.to_string(caller.module)
+    file_name = "#{Macro.underscore(name)}.ex"
+    content = """
+      defmodule #{name} do
+        #{body}
+      end
+      """
+      |> Code.format_string!()
+
+    File.write(".inheritdebug/#{file_name}", content)
+
+    quoted
+  end
 end
