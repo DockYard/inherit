@@ -197,6 +197,7 @@ defmodule Inherit do
           args = Inherit.build_args(meta.arity)
           
           quote do
+            @doc false
             def unquote(name)(unquote_splicing(args)) do
               apply(unquote(ancestor_module), unquote(name), [unquote_splicing(args)])
             end
