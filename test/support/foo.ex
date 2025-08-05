@@ -22,7 +22,6 @@ defmodule Foo do
         :ignore
       end
       defwithhold init: 0, init: 1
-      defoverridable init: 0, init: 1
 
       def module do
         __MODULE__
@@ -55,7 +54,6 @@ defmodule Foo do
     :ignore
   end
   defwithhold init: 0, init: 1
-  defoverridable init: 0, init: 1
 
   def incr(val, by \\ 1) do
     val  + by

@@ -261,6 +261,9 @@ defmodule Inherit do
   not be automatically delegated to child modules. Functions marked with 
   `defwithhold` must be defined independently by each module that needs them.
 
+  > #### Warning! {: .warning}
+  > `defwithhold/1` cannot be used with `defoverridable/1`
+
   ## Parameters
 
   - `keywords_or_behaviour` - A keyword list of `{function_name, arity}` pairs
