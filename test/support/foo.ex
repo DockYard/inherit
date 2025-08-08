@@ -27,6 +27,7 @@ defmodule Foo do
         __MODULE__
       end
       defwithhold module: 0
+      defoverridable module: 0
 
       def incr(val) do
         super(val)  + 1

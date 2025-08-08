@@ -20,5 +20,9 @@ defmodule Qux do
     Map.merge(super(qux), %{qux: 1})
   end
   defoverridable encode: 1
+
+  def module do
+    Atom.to_string(__MODULE__)
+  end
 end
 

@@ -247,6 +247,7 @@ defmodule Inherit do
       functions =
         ancestor.__info__(:attributes) |> Keyword.get(:"$inherit:functions", [])
         |> Enum.filter(fn
+          {_name, %{withhold: true}} -> false
           {_name, %{delegate: false}} -> true
           _other -> false
         end)
@@ -261,9 +262,6 @@ defmodule Inherit do
   This macro removes functions from the inheritance mechanism, ensuring they will
   not be automatically delegated to child modules. Functions marked with 
   `defwithhold` must be defined independently by each module that needs them.
-
-  > #### Warning! {: .warning}
-  > `defwithhold/1` cannot be used with `defoverridable/1`
 
   ## Parameters
 
@@ -301,7 +299,7 @@ defmodule Inherit do
   defmacro defwithhold(keywords_or_behaviour) do
     quote do
       Enum.each(unquote(keywords_or_behaviour), fn({name, arity}) ->
-        Inherit.remove_function_defs(name, arity)
+        Inherit.update_function_defs(name, arity, %{delegate: true})
       end)
     end
   end
@@ -346,20 +344,6 @@ defmodule Inherit do
     end
   end
 
-  @doc false
-  defmacro remove_function_defs(name, arity) do
-    quote bind_quoted: [name: name, arity: arity] do
-      if functions = Module.get_attribute(__MODULE__, :"$inherit:functions") do
-        functions =
-          Enum.reject(functions, fn
-            {^name, %{arity: ^arity}} -> true
-            _other -> false
-          end)
-
-        Module.put_attribute(__MODULE__, :"$inherit:functions", functions)
-      end
-    end
-  end
 
   @doc false
   defmacro update_function_defs(name, arity, update_meta) do
@@ -373,7 +357,7 @@ defmodule Inherit do
 
         {name, meta} =
           case function_idx do
-            nil -> {name, %{arity: arity, overridable: false, delegate: false}}
+            nil -> {name, %{arity: arity, overridable: false, delegate: false, withhold: false}}
             idx -> Enum.at(functions, idx)
           end
 

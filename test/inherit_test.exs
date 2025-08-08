@@ -30,9 +30,9 @@ defmodule InheritTest do
   end
 
   test "overridden __using__ is inherited with proper module scope" do
-    assert Qux.module() == Qux
     assert Baz.module() == Baz
     assert Bar.module() == Bar
+    assert Qux.module() =~ "Qux"
   end
 
   test "properly implements ineritance order of functions" do
