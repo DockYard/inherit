@@ -295,7 +295,7 @@ by adding `inherit` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:inherit, "~> 0.2.1"}
+    {:inherit, "~> 0.3.0"}
   ]
 end
 ```
