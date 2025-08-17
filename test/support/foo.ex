@@ -13,7 +13,7 @@ defmodule Foo do
     quote location: :keep do
       use GenServer
       require Inherit
-      Inherit.setup(unquote(__MODULE__), unquote(Macro.escape(fields)))
+      Inherit.from(unquote(__MODULE__), unquote(Macro.escape(fields)))
 
       def used?, do: true
       defoverridable used?: 0
@@ -26,7 +26,6 @@ defmodule Foo do
       def module do
         __MODULE__
       end
-      defwithhold module: 0
       defoverridable module: 0
 
       def incr(val) do
@@ -39,6 +38,10 @@ defmodule Foo do
   @impl true
   def handle_call(:get, _from, state) do
     {:reply, state, state}
+  end
+
+  def handle_call(%{call: false}, _from, state) do
+    {:reply, false, state}
   end
 
   def handle_call({:assign, assigns}, _from, state) when is_list(assigns) do
@@ -56,7 +59,7 @@ defmodule Foo do
   end
   defwithhold init: 0, init: 1
 
-  def incr(val, by \\ 1) do
+  def incr(val, by \\ 1) when is_integer(val) do
     val  + by
   end
   defoverridable [incr: 1, incr: 2]
@@ -66,6 +69,10 @@ defmodule Foo do
   defoverridable allowed: 0
 
   def add(a, b) when is_integer(a) and is_integer(b) do
+    do_adder(a, b)
+  end
+
+  defp do_adder(a, b) do
     a + b
   end
 

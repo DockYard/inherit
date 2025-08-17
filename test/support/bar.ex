@@ -12,7 +12,7 @@ defmodule Bar do
   defoverridable allowed: 0
 
   def incr(val) do
-    parent().incr(val) + 1
+    __PARENT__.incr(val) + 1
   end
   defoverridable incr: 1
 
@@ -21,6 +21,6 @@ defmodule Bar do
   end
 
   def handle_call(msg, from, state) do
-    parent().handle_call(msg, from, state)
+    __PARENT__.handle_call(msg, from, state)
   end
 end

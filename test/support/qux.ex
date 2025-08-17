@@ -13,7 +13,7 @@ defmodule Qux do
   # so we can assert that the priority
   # is correct
   def incr(val) do
-    parent().incr(val) + 1
+    __PARENT__.incr(val) + 1
   end
 
   def encode(qux) do

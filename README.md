@@ -1,19 +1,32 @@
 # Inherit
 
-Inherit provides pseudo-inheritance in Elixir by allowing modules to inherit struct fields, delegate function calls, and override behaviors from parent modules.
+Inherit provides compile-time pseudo-inheritance in Elixir through sophisticated AST manipulation, allowing modules to inherit struct fields, delegate function calls, and override behaviors from parent modules.
 
 ## Features
 
-- **Struct inheritance**: Child modules inherit all fields from parent modules
-- **Function delegation**: Public functions from parent modules are automatically delegated
-- **Function overriding**: Parent functions marked with `defoverridable` can be overridden by child modules
+- **Struct inheritance**: Child modules inherit all fields from parent modules with field merging
+- **AST-based function inheritance**: Functions are inherited through compile-time AST generation, not runtime delegation
+- **Function overriding with `defoverridable`**: Parent functions marked with `defoverridable` can be overridden by child modules
+- **`__PARENT__` module access**: Use `__PARENT__` to directly reference the parent module in function bodies
+- **`super()` calls**: Call the parent implementation when overriding inherited functions
+- **Function withholding**: Use `defwithhold` to prevent specific functions from being inherited
+- **Deep inheritance chains**: Support for multiple levels of inheritance with proper AST propagation
 - **Custom `__using__` inheritance**: Parent modules can define custom `__using__` macros that are inherited
-- **Parent module access**: Use `parent()` to access the parent module and call parent functions
-- **Super calls**: Use `super()` to call the original implementation of overridden functions
-- **Deep inheritance chains**: Support for multiple levels of inheritance
 - **GenServer integration**: Works seamlessly with GenServer and other OTP behaviors
 
-## Usage
+## Installation
+
+Add `inherit` to your list of dependencies in `mix.exs`:
+
+```elixir
+def deps do
+  [
+    {:inherit, "~> 0.3.0"}
+  ]
+end
+```
+
+## Basic Usage
 
 ### Making a module inheritable
 
@@ -34,7 +47,7 @@ defmodule Person do
   def adult?(person) do
     person.age >= 18
   end
-  defoverridable adult?: 1  # Allow child modules to override this
+  defoverridable adult?: 1
   
   def name_length(person) do
     String.length(person.name)
@@ -60,9 +73,9 @@ defmodule Employee do
   end
   defoverridable greet: 1
 
-  # Access parent module directly
+  # Access parent module directly using __PARENT__
   def is_adult_person(employee) do
-    parent().adult?(employee)
+    __PARENT__.adult?(employee)
   end
   
   # This would compile with warning but never be called:
@@ -90,7 +103,7 @@ Employee.greet(employee)
 Employee.adult?(employee)
 # => true
 
-# Call parent function via parent()
+# Call parent function via __PARENT__
 Employee.is_adult_person(employee)
 # => true
 
@@ -114,12 +127,11 @@ defmodule BaseServer do
     quote do
       use GenServer
       require Inherit
-      Inherit.setup(unquote(__MODULE__), unquote(fields))
+      Inherit.from(unquote(__MODULE__), unquote(fields))
 
       def start_link(opts \\ []) do
         GenServer.start_link(__MODULE__, opts, name: __MODULE__)
       end
-      defwithhold start_link: 1
       defoverridable start_link: 1
     end
   end
@@ -128,47 +140,45 @@ defmodule BaseServer do
   def init(opts) do
     {:ok, struct(__MODULE__, opts)}
   end
+  defoverridable init: 1
 end
 
 defmodule MyServer do
   use BaseServer, [additional_field: "value"]
   
   # Inherits GenServer behavior and start_link function
-  # Can override start_link if needed
+  # Can override start_link and init if needed
 end
 ```
 
 ### Deep inheritance chains
 
 ```elixir
-defmodule GrandParent do
-  use Inherit, [a: 1]
-  def value(x), do: x
+defmodule LivingThing do
+  use Inherit, [alive: true]
+  
+  def life_span(thing), do: thing.alive && 100
+  defoverridable life_span: 1
 end
 
-defmodule Parent do
-  use GrandParent, [b: 2]
-  def value(x), do: super(x) + 10
-  defoverridable value: 1
+defmodule Animal do
+  use LivingThing, [mobile: true]
+  
+  def life_span(animal), do: super(animal) + 50
+  defoverridable life_span: 1
 end
 
-defmodule Child do
-  use Parent, [c: 3]
-  def value(x), do: super(x) + 100
-  defoverridable value: 1
+defmodule Mammal do
+  use Animal, [warm_blooded: true]
+  
+  def life_span(mammal), do: super(mammal) + 25
+  defoverridable life_span: 1
 end
 
-# Child.value(5) => 115 (5 + 10 + 100)
+# Mammal.life_span(%Mammal{}) => 175 (100 + 50 + 25)
 ```
 
-### Helper Functions
-
-- `parent()` - Returns the immediate parent module
-- `parent(module)` - Returns the parent of the specified module  
-- `super(args...)` - Calls the parent implementation when overriding inherited functions
-- `defwithhold` - Prevents specified functions from being inherited by child modules
-
-### Preventing Inheritance with `defwithhold`
+### Preventing inheritance with `defwithhold`
 
 By default, all public functions are inherited by child modules. Use `defwithhold` to prevent specific functions from being inherited:
 
@@ -228,76 +238,111 @@ Child.can_override()    # => "child"
 Child.cannot_override() # => "parent only" (parent's version always used)
 ```
 
-## How it works
+## Key Differences from OOP Inheritance
 
-The inheritance system creates a tree structure where modules can inherit from parent modules and define their own functions. Here's an example inheritance tree:
+Unlike traditional object-oriented inheritance, Inherit operates at compile-time through AST manipulation:
+
+1. **Compile-time**: All inheritance is resolved during compilation through AST generation
+2. **Explicit overriding**: Only functions marked `defoverridable` can be overridden
+3. **Function delegation**: Non-overridden functions are automatically generated as delegation calls
+4. **AST-based super calls**: `super()` calls are resolved at compile time to direct parent calls
+5. **Module-level inheritance**: Inheritance works at the module level, not the instance level
+
+## How It Works
+
+The inheritance system creates a compile-time inheritance tree where modules can inherit from parent modules through AST manipulation:
 
 ```mermaid
 flowchart TD
-    GrandParent["GrandParent<br/>use Inherit, [field: 1]<br/>defines: grandparent_func()"] 
+    LivingThing["LivingThing<br/>use Inherit, [alive: true]<br/>defines: breathe(), grow()"] 
     
-    Parent["Parent<br/>use GrandParent, [field: 2]<br/>inherits: grandparent_func()<br/>defines: parent_func()"]
+    Animal["Animal<br/>use LivingThing, [mobile: true]<br/>inherits: breathe(), grow()<br/>defines: move(), hunt()"]
     
-    Uncle["Uncle<br/>use GrandParent, [field: 3]<br/>inherits: grandparent_func()<br/>defines: uncle_func()"]
+    Plant["Plant<br/>use LivingThing, [mobile: false]<br/>inherits: breathe(), grow()<br/>defines: photosynthesize()"]
     
-    Child["Child<br/>use Parent, [field: 4]<br/>inherits: grandparent_func(), parent_func()<br/>defines: child_func()"]
+    Mammal["Mammal<br/>use Animal, [warm_blooded: true]<br/>inherits: breathe(), grow(), move(), hunt()<br/>defines: nurse_young()"]
     
-    GrandParent --> Parent
-    GrandParent --> Uncle
-    Parent --> Child
+    LivingThing --> Animal
+    LivingThing --> Plant
+    Animal --> Mammal
     
-    style GrandParent fill:#FF9800,stroke:#E65100,stroke-width:3px,color:#fff
-    style Parent fill:#2196F3,stroke:#0D47A1,stroke-width:3px,color:#fff
-    style Uncle fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
-    style Child fill:#9C27B0,stroke:#4A148C,stroke-width:3px,color:#fff
+    style LivingThing fill:#FF9800,stroke:#E65100,stroke-width:3px,color:#fff
+    style Animal fill:#2196F3,stroke:#0D47A1,stroke-width:3px,color:#fff
+    style Plant fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
+    style Mammal fill:#9C27B0,stroke:#4A148C,stroke-width:3px,color:#fff
 ```
 
-**Inheritance tree explanation:**
+**Technical Implementation:**
 
-- **GrandParent**: Root module that uses `Inherit` and defines `grandparent_func()`
-- **Parent**: Inherits from GrandParent, gets `grandparent_func()` automatically, defines `parent_func()`
-- **Uncle**: Also inherits from GrandParent (sibling to Parent), gets `grandparent_func()`, defines `uncle_func()`
-- **Child**: Inherits from Parent, gets both `grandparent_func()` and `parent_func()` automatically, defines `child_func()`
+1. **Compile-time Processing**: All inheritance is resolved during compilation for zero runtime overhead
+2. **Dual Inheritance Strategy**: 
+   - **AST Copying**: Functions with no private calls have their AST copied directly to child modules
+   - **Delegation**: Functions that call private functions are inherited as delegation calls to preserve encapsulation
+3. **Private Function Detection**: The system analyzes parent function AST to detect calls to private functions
+4. **Override Resolution**: `defoverridable` functions can be overridden, while others generate delegation calls
+5. **Macro Expansion**: `__PARENT__` and `super()` calls are expanded to direct module references during compilation
 
-**Function availability:**
+## API Reference
+
+- `__PARENT__` - Compile-time macro that expands to the immediate parent module
+- `super(args...)` - Calls the parent implementation when overriding inherited functions  
+- `defwithhold` - Prevents specified functions from being inherited by child modules
+
+## Examples
+
+### Basic inheritance with field merging:
+
 ```elixir
-# Child has access to all functions in the inheritance chain
-Child.grandparent_func()  # Delegated from GrandParent
-Child.parent_func()       # Delegated from Parent  
-Child.child_func()        # Defined locally
-
-# Uncle only has access to GrandParent functions
-Uncle.grandparent_func()  # Delegated from GrandParent
-Uncle.uncle_func()        # Defined locally
-
-# Parent has access to GrandParent functions
-Parent.grandparent_func() # Delegated from GrandParent
-Parent.parent_func()      # Defined locally
+# Inheritance chain: Animal -> Mammal -> Primate -> Human
+%Animal{species: "", habitat: ""}
+%Mammal{species: "", habitat: "", warm_blooded: true, fur_type: ""}
+%Primate{species: "", habitat: "", warm_blooded: true, fur_type: "", opposable_thumbs: true}
+%Human{species: "Homo sapiens", habitat: "Global", warm_blooded: true, fur_type: "", opposable_thumbs: true, language: ""}
 ```
 
-**Key inheritance principles:**
-- **Deep inheritance**: Child inherits transitively through the entire chain (GrandParent → Parent → Child)
-- **Sibling inheritance**: Uncle and Parent both inherit from GrandParent but are independent of each other
-- **Function delegation**: All ancestor functions are automatically available through delegation
-- **Custom behavior**: Each module can define its own functions while inheriting from ancestors
-
-This ensures that:
-- All ancestor functions are available through delegation
-- Custom `__using__` macros from ancestors are inherited
-- Direct parent `__using__` is not duplicated
-- The inheritance chain is properly established
-
-## Installation
-
-If [available in Hex](https://hex.pm/docs/publish), the package can be installed
-by adding `inherit` to your list of dependencies in `mix.exs`:
+### Function inheritance strategies:
 
 ```elixir
-def deps do
-  [
-    {:inherit, "~> 0.3.0"}
-  ]
+# AST Copying vs Delegation based on private function usage
+
+# Parent with private function calls
+defmodule Parent do
+  use Inherit, [field: 1]
+  
+  defp private_helper(x), do: x * 2
+  
+  def with_private_call(x) do
+    private_helper(x) + 1    # Calls private function
+  end
+  defoverridable with_private_call: 1
+  
+  def without_private_call(x) do
+    x + 10                   # No private function calls
+  end
+  defoverridable without_private_call: 1
 end
+
+defmodule Child do
+  use Parent, [child_field: 2]
+end
+
+# Results demonstrate different inheritance strategies:
+Child.with_private_call(5)    # => 11 (delegated: apply(Parent, :with_private_call, [5]))
+Child.without_private_call(5) # => 15 (AST copied: x + 10)
+
+# Real example - Animal.move/1 calls private validate_movement/1
+Animal.move("walk")     # => "Moving by walk" (original implementation)
+Mammal.move("run")      # => "Moving by run" (delegated to Animal due to private function call)
+Primate.move("swing")   # => "Moving by swing" (delegated through inheritance chain)
+Human.move("walk")      # => "Moving by walk" (delegated through inheritance chain)
+
+# Override behavior with defoverridable
+Animal.describe()       # => "I am an animal"
+Mammal.describe()       # => "I am an animal that is warm-blooded" (overrides and calls super())
+Primate.describe()      # => "I am an animal that is warm-blooded with opposable thumbs" (overrides and calls __PARENT__)
+
+# Functions without defoverridable cannot be overridden
+Human.special_ability() # => "opposable thumbs" (calls Primate.special_ability, not Human - emits warning)
 ```
 
 ## Documentation
@@ -305,4 +350,3 @@ end
 Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
 and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
 be found at <https://hexdocs.pm/inherit>.
-
