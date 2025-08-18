@@ -24,11 +24,6 @@ defmodule Foo do
       end
       defwithhold init: 0, init: 1
 
-      def module do
-        __MODULE__
-      end
-      defoverridable module: 0
-
       def incr(val) do
         super(val)  + 1
       end
@@ -85,5 +80,10 @@ defmodule Foo do
     foo
   end
   defoverridable encode: 1
+
+  def module do
+    Utils.print_module(__MODULE__)
+  end
+  defoverridable module: 0
 end
 

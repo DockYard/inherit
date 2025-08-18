@@ -589,7 +589,7 @@ defmodule Inherit do
     {_ast, private_call?} = Macro.prewalk(body, false, fn
       {name, _meta, nil} = ast, bool when is_atom(name) ->
         {ast, bool}
-      {name, _meta, args} = ast, bool when is_atom(name) and is_list(args) ->
+      {name, _meta, args} = ast, bool when is_atom(name) and is_list(args) and name not in [:., :__aliases__] ->
         if length(args) in Keyword.get_values(public_funcs, name) do
           {ast, bool}
         else
