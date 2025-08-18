@@ -1,19 +1,20 @@
 defmodule Foo do
   use GenServer
 
-  @derive {Inspect, only: [:list]}
-
+  # @derive {Inspect, only: [:list]}
+  #
   use Inherit, [
     assigns: %{},
     list: [],
-    a: 1
+    a: 1,
+    z: %{}
   ]
 
   defmacro __using__(fields) do
     quote location: :keep do
       use GenServer
       require Inherit
-      Inherit.from(unquote(__MODULE__), unquote(Macro.escape(fields)))
+      Inherit.from(unquote(__MODULE__), unquote(fields))
 
       def used?, do: true
       defoverridable used?: 0

@@ -1,6 +1,7 @@
 defmodule Bar do
   use Foo, [
-    b: 2, c: %{
+    b: 2,
+    c: %{
       a: 1,
       b: {:a, [], [1, 2]}
     }

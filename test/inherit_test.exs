@@ -46,4 +46,13 @@ defmodule InheritTest do
   test "can inherit from an empty parent" do
     %Other{} = _other = %Other{}
   end
+
+  test "inherited fields should not escaped macros" do
+    bar = %Bar{}
+    assert [] == bar.list
+    assert 1 == bar.a
+    assert %{} == bar.assigns
+    assert 2 == bar.b
+    assert %{a: 1, b: {:a, [], [1, 2]}} == bar.c
+  end
 end

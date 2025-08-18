@@ -320,7 +320,7 @@ defmodule Inherit do
       defmacro __using__(fields) do
         quote do
           require Inherit
-          Inherit.from(unquote(__MODULE__), unquote(Macro.expand_literals(fields, __CALLER__)))
+          Inherit.from(unquote(__MODULE__), unquote(fields))
         end
       end
       Kernel.defoverridable __using__: 1
@@ -532,15 +532,6 @@ defmodule Inherit do
   It should not be called directly by users - instead use `use ParentModule, fields`.
   """
   defmacro from(parent, fields) do
-    fields =
-      struct(parent)
-      |> Map.to_list()
-      |> Enum.reject(fn 
-        {:__struct__, _value} -> true
-        _other -> false
-      end)
-      |> Keyword.merge(Macro.expand_literals(fields, __CALLER__))
-
     put_attribute(__CALLER__.module, :parent, parent)
 
     public_funcs = parent.__info__(:functions)
@@ -578,13 +569,18 @@ defmodule Inherit do
       end)
 
     quoted = quote do
-      use Inherit, unquote(Macro.escape(fields))
+      fields =
+        struct(unquote(parent))
+        |> Map.to_list()
+        |> Enum.reject(fn 
+          {:__struct__, _value} -> true
+          _other -> false
+        end)
+        |> Keyword.merge(unquote(fields))
+
+      use Inherit, fields
       unquote_splicing(parent_ast_quoted)
     end
-    
-    # IO.puts("#{__CALLER__.module}")
-    #
-    # Macro.expand(quoted, __CALLER__) |> Macro.to_string() |> IO.puts()
 
     quoted
   end
