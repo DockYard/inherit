@@ -300,6 +300,8 @@ defmodule Inherit do
   """
   defmacro __using__(fields) do
     quote do
+      @before_compile Inherit
+
       import Kernel, except: [
         def: 1,
         def: 2,
@@ -327,6 +329,12 @@ defmodule Inherit do
     end
   end
 
+  @doc false
+  defmacro __before_compile__(env) do
+    put_attribute(env.module, :private_funcs, Module.definitions_in(env.module, :defp))
+  end
+
+  @doc false
   defmacro __PARENT__ do
     quote do
     end
@@ -534,13 +542,11 @@ defmodule Inherit do
   defmacro from(parent, fields) do
     put_attribute(__CALLER__.module, :parent, parent)
 
-    public_funcs = parent.__info__(:functions)
-
     parent_ast_quoted = 
       get_attribute(parent, :ast, [])
       |> Enum.map(fn(
         {:def, name, args, guards, body}) ->
-          {args, body} = if local_private_call?(body, public_funcs) do
+          {args, body} = if local_private_call?(body, parent) do
             args = build_func_args(args, guards)
             body = build_func_body(parent, name, args)
 
@@ -585,15 +591,17 @@ defmodule Inherit do
     quoted
   end
 
-  defp local_private_call?(body, public_funcs) do
+  defp local_private_call?(body, module) do
+    private_funcs = get_attribute(module, :private_funcs)
+
     {_ast, private_call?} = Macro.prewalk(body, false, fn
       {name, _meta, nil} = ast, bool when is_atom(name) ->
         {ast, bool}
-      {name, _meta, args} = ast, bool when is_atom(name) and is_list(args) and name not in [:., :__aliases__] ->
-        if length(args) in Keyword.get_values(public_funcs, name) do
-          {ast, bool}
-        else
+      {name, _meta, args} = ast, bool when is_atom(name) and is_list(args) ->
+        if length(args) in Keyword.get_values(private_funcs, name) do
           {ast, true}
+        else
+          {ast, bool}
         end
       ast, bool -> {ast, bool}
     end)
