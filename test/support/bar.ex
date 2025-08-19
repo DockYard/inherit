@@ -1,5 +1,6 @@
 defmodule Bar do
   import Utils, only: [
+    to_pid: 1,
     is_node_or_pid: 1
   ]
 
@@ -28,6 +29,10 @@ defmodule Bar do
 
   def importer(node_or_pid) when is_node_or_pid(node_or_pid) do
     node_or_pid
+  end
+
+  def other_import(node_or_pid) do
+    to_pid(node_or_pid)
   end
 
   def incr(val) do

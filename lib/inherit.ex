@@ -344,24 +344,47 @@ defmodule Inherit do
   defmacro def(call, expr \\ nil) do
     {{name, _meta, args}, guards} = :elixir_utils.extract_guards(call)
 
-    expr = case parent(__CALLER__.module) do
-      nil -> 
-        Macro.prewalk(expr, fn
-          {:__PARENT__, _meta, nil} ->
-            raise "Cannot call __PARENT__ within #{__CALLER__.module} as it is the root ancestor."
-          other -> other
-        end)
-      parent_mod ->
-        parent_mod = Module.split(parent_mod) |> Enum.map(&String.to_atom/1)
+    expr = 
+      Macro.prewalk(expr, fn
+        {:__PARENT__, meta, nil} ->
+          case parent(__CALLER__.module) do
+            nil ->
+              raise "Cannot call __PARENT__ within #{__CALLER__.module} as it is the root ancestor."
+            parent_mod ->
+              parent_mod = Module.split(parent_mod) |> Enum.map(&String.to_atom/1)
+              {:__aliases__, meta, parent_mod}
+          end
+      end)
 
-        Macro.prewalk(expr, fn
-          {:__PARENT__, meta, nil} ->
-            {:__aliases__, meta, parent_mod}
-
-          other ->
-            other
-        end)
+    quoted_def = quote do
+      Kernel.def(unquote(call), unquote(expr))
     end
+
+    expr =
+      Macro.prewalk(expr, fn
+        {name, meta, args} when is_atom(name) and name not in [:., :=] and is_list(args) ->
+          case remote_caller(__CALLER__, name, length(List.wrap(args))) do
+            {:def, module} ->
+              split_module = Module.split(module) |> Enum.map(&String.to_atom(&1))
+
+              {{:., [], [{:__aliases__, [alias: false], split_module}, name]}, meta, args}
+              
+            {:defmacro, module} ->
+              split_module = Module.split(module) |> Enum.map(&String.to_atom(&1))
+
+              {{:., [], [{:__aliases__, [alias: false], split_module}, name]}, meta, args}
+
+              put_attribute_lazy(__CALLER__.module, :requires, fn(requires) ->
+                List.insert_at(requires || [], -1, module) |> Enum.uniq()
+              end)
+
+            nil ->
+              {name, meta, args}
+          end
+
+        other ->
+          other
+      end)
 
     args = case args do
       args when is_list(args) -> args
@@ -390,9 +413,9 @@ defmodule Inherit do
                 List.insert_at(requires || [], -1, module) |> Enum.uniq()
               end)
 
-              aliases = Module.split(module) |> Enum.map(&String.to_atom(&1))
+              split_module = Module.split(module) |> Enum.map(&String.to_atom(&1))
 
-              {{:., [], [{:__aliases__, [alias: false], aliases}, name]}, meta, args}
+              {{:., [], [{:__aliases__, [alias: false], split_module}, name]}, meta, args}
           end
 
         other -> other
@@ -405,8 +428,24 @@ defmodule Inherit do
 
     put_attribute(__CALLER__.module, :ast, ast)
 
-    quote do
-      Kernel.def(unquote(call), unquote(expr))
+    quoted_def
+  end
+
+  defp remote_caller(caller, name, arity) do
+    find = fn(module_functions, name, arity) ->
+      Enum.find(module_functions, fn({_module, functions}) ->
+        arity in Keyword.get_values(functions, name)
+      end)
+    end
+
+    if result = find.(caller.functions, name, arity) do
+        {:def, elem(result, 0)}
+    else
+      if result = find.(caller.macros, name, arity) do
+        {:defmacro, elem(result, 0)}
+      else
+        nil
+      end
     end
   end
 
