@@ -22,6 +22,10 @@ defmodule Bar do
     end
   end
 
+  def capture do
+    Enum.each(1..1, &allowed/0) 
+  end
+
   def allowed do
     super() ++ [z: 1]
   end

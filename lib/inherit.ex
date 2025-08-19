@@ -365,12 +365,15 @@ defmodule Inherit do
 
     expr =
       Macro.prewalk(expr, fn
+        {{:., _combinator_meta, [{:__aliases__, _alias_meta, [:Kernel]}, _name]}, _meta, _args} = ast ->
+          ast
+
         {{:., _combinator_meta, [{:__aliases__, _alias_meta, split_module}, name]}, _meta, args} = ast when is_atom(name) and is_list(args) ->
           define_require(__CALLER__, Module.concat(split_module))
 
           ast
 
-        {name, meta, args} when is_atom(name) and name not in [:., :=] and is_list(args) ->
+        {name, meta, args} when is_atom(name) and name not in [:., :=, :/] and is_list(args) ->
           case remote_caller(__CALLER__, name, length(List.wrap(args))) do
             {:def, module} ->
               split_module = Module.split(module) |> Enum.map(&String.to_atom(&1))
@@ -404,7 +407,7 @@ defmodule Inherit do
           define_require(__CALLER__, Module.concat(split_module))
 
           ast
-        {name, meta, args} when is_atom(name) and name not in [:=, :\\, :and, :or, :not] and is_list(args) ->
+        {name, meta, args} when is_atom(name) and name not in [:=, :\\, :/, :and, :or, :not] and is_list(args) ->
           arity = length(args)
           Enum.find(__CALLER__.macros, fn({_module, macros}) ->
             arity in Keyword.get_values(macros, name)
@@ -664,6 +667,7 @@ defmodule Inherit do
       use Inherit, Inherit.merge_from(unquote(parent), unquote(fields))
       unquote_splicing(parent_ast_quoted)
     end
+      |> debug(__CALLER__, quoted: true)
   end
 
   defp local_private_call?(body, module) do
@@ -803,16 +807,22 @@ defmodule Inherit do
   end
 
   @doc false
-  def debug(quoted, caller) do
-    body = Macro.expand(quoted, caller) |> Macro.to_string()
+  def debug(quoted, caller, opts \\ []) do
+    body = Macro.expand(quoted, caller)
+
     <<"Elixir.", name::binary>> = Atom.to_string(caller.module)
     file_name = "#{Macro.underscore(name)}.ex"
-    content = """
+
+    content = if Keyword.get(opts, :quoted) do
+      inspect(body, pretty: true, printable_limit: :infinity, limit: :infinity)
+    else
+      """
       defmodule #{name} do
-        #{body}
+        #{Macro.to_string(body)}
       end
       """
       |> Code.format_string!()
+    end
 
     File.write(".inheritdebug/#{file_name}", content)
 
