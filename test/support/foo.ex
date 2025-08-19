@@ -50,6 +50,17 @@ defmodule Foo do
   defoverridable handle_call: 3
 
   @impl true
+  @doc false
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{refs: refs} = object) when is_map_key(refs, ref) do
+    object = do_down(object, Map.get(refs, ref), [])
+    {:noreply, object}
+  end
+
+  defp do_down(object, _ref, []) do
+    object
+  end
+
+  @impl true
   def init(_opts \\ []) do
     :ignore
   end

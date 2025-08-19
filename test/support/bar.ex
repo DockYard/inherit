@@ -1,4 +1,8 @@
 defmodule Bar do
+  import Utils, only: [
+    is_node_or_pid: 1
+  ]
+
   use Foo, [
     b: 2,
     c: %{
@@ -7,10 +11,24 @@ defmodule Bar do
     }
   ]
 
+  defmacro __using__(fields) do
+    quote do
+      import Utils, only: [
+        is_node_or_pid: 1
+      ]
+      require Inherit
+      Inherit.from(unquote(__MODULE__), unquote(fields))
+    end
+  end
+
   def allowed do
     super() ++ [z: 1]
   end
   defoverridable allowed: 0
+
+  def importer(node_or_pid) when is_node_or_pid(node_or_pid) do
+    node_or_pid
+  end
 
   def incr(val) do
     __PARENT__.incr(val) + 1
@@ -20,6 +38,7 @@ defmodule Bar do
   def handle_call(:get, _from, state) do
     {:reply, state, state}
   end
+
 
   def handle_call(msg, from, state) do
     __PARENT__.handle_call(msg, from, state)

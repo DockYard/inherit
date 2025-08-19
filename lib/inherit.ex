@@ -343,7 +343,7 @@ defmodule Inherit do
   @doc false
   defmacro def(call, expr \\ nil) do
     {{name, _meta, args}, guards} = :elixir_utils.extract_guards(call)
-    
+
     expr = case parent(__CALLER__.module) do
       nil -> 
         Macro.prewalk(expr, fn
@@ -367,6 +367,37 @@ defmodule Inherit do
       args when is_list(args) -> args
       _args -> []
     end
+
+    guards = Enum.map(guards, fn(ast) ->
+      Macro.prewalk(ast, fn 
+        {{:., _module_meta, [{:__aliases__, _alias_meta, split_module}, _name]}, _meta, _args} = ast ->
+          put_attribute_lazy(__CALLER__.module, :requires, fn(requires) ->
+            List.insert_at(requires || [], -1, Module.concat(split_module)) |> Enum.uniq()
+          end)
+
+          ast
+        {name, meta, args} when is_atom(name) and name not in [:=, :\\, :and, :or, :not] and is_list(args) ->
+          arity = length(args)
+          Enum.find(__CALLER__.macros, fn({_module, macros}) ->
+            arity in Keyword.get_values(macros, name)
+          end)
+          |> case do
+            nil ->
+              {name, meta, args}
+
+            {module, _macros} ->
+              put_attribute_lazy(__CALLER__.module, :requires, fn(requires) ->
+                List.insert_at(requires || [], -1, module) |> Enum.uniq()
+              end)
+
+              aliases = Module.split(module) |> Enum.map(&String.to_atom(&1))
+
+              {{:., [], [{:__aliases__, [alias: false], aliases}, name]}, meta, args}
+          end
+
+        other -> other
+      end)
+    end)
 
     ast =
       get_attribute(__CALLER__.module, :ast, [])
@@ -542,6 +573,12 @@ defmodule Inherit do
   defmacro from(parent, fields) do
     put_attribute(__CALLER__.module, :parent, parent)
 
+    requires_ast = Enum.map(get_attribute(parent, :requires, []), fn(module) ->
+      quote do
+        require unquote(module)
+      end
+    end)
+
     parent_ast_quoted = 
       get_attribute(parent, :ast, [])
       |> Enum.map(fn(
@@ -574,21 +611,12 @@ defmodule Inherit do
           end
       end)
 
-    quoted = quote do
-      fields =
-        struct(unquote(parent))
-        |> Map.to_list()
-        |> Enum.reject(fn 
-          {:__struct__, _value} -> true
-          _other -> false
-        end)
-        |> Keyword.merge(unquote(fields))
-
-      use Inherit, fields
+    quote do
+      unquote_splicing(requires_ast)
+      use Inherit, Inherit.merge_from(unquote(parent), unquote(fields))
       unquote_splicing(parent_ast_quoted)
     end
-
-    quoted
+    |> debug(__CALLER__)
   end
 
   defp local_private_call?(body, module) do
@@ -610,24 +638,18 @@ defmodule Inherit do
   end
 
   defp build_func_args(args, guards) do
-    {_ast, guard_vars} = Macro.prewalk(guards, MapSet.new([]), fn 
-      {name, _meta, nil} = ast, guard_vars when is_atom(name) -> {ast, MapSet.put(guard_vars, name)}
-      other, guard_vars -> {other, guard_vars}
+    {_ast, guard_args} = Macro.prewalk(guards, MapSet.new([]), fn 
+      {name, _meta, nil} = ast, guard_args when is_atom(name) -> {ast, MapSet.put(guard_args, name)}
+      other, guard_args -> {other, guard_args}
     end)
 
     args
     |> Enum.with_index()
     |> Enum.map(fn
-      {{:=, meta, args}, _idx} when is_list(args) ->
-        {name, _meta, context} = List.last(args)
-        {deunderscore(name), meta, context}
-      {{:\\, meta, [{name, name_meta, nil}, value]}, _idx} ->
-        {:\\, meta, [{deunderscore(name), name_meta, nil}, value]}
-      {{name, meta, context}, _idx} when is_atom(name) and is_atom(context) -> {deunderscore(name), meta, context}
-      {{:%{}, _meta, _values} = ast, idx} ->
+      {{:=, meta, [ast, {name, name_meta, name_context}]}, _idx} when is_list(args) ->
         ast = Macro.prewalk(ast, fn 
           {name, meta, nil} when is_atom(name) ->
-            if MapSet.member?(guard_vars, name) do
+            if MapSet.member?(guard_args, name) do
               {name, meta, nil}
             else
               {underscore(name), meta, nil}
@@ -636,14 +658,35 @@ defmodule Inherit do
           ast -> ast
         end)
 
-        {:= , [], [ast, {:"var_#{idx}", [], Elixir}]}
+        {:= , meta, [ast, {deunderscore(name), name_meta, name_context}]}
+
+      {{:\\, meta, [{name, name_meta, nil}, value]}, _idx} ->
+        {:\\, meta, [{deunderscore(name), name_meta, nil}, value]}
+
+      {{name, meta, context}, _idx} when is_atom(name) and (is_atom(context) or is_nil(context)) ->
+        {deunderscore(name), meta, context}
+
+      {{type, _meta, _fields} = ast, idx} when type in [:%{}, :{}] ->
+        ast = Macro.prewalk(ast, fn 
+          {name, meta, nil} when is_atom(name) ->
+            if MapSet.member?(guard_args, name) do
+              {name, meta, nil}
+            else
+              {underscore(name), meta, nil}
+            end
+
+          ast -> ast
+        end)
+
+        {:= , [], [ast, {:"arg#{idx}", [], Elixir}]}
+
       {literal, _idx} -> literal
     end)
   end
 
   defp build_func_body(parent, name, args) do
     args = Enum.map(args, fn
-      {:\\, _meta, [var, _value]}-> var
+      {:\\, _meta, [arg, _value]}-> arg
       {:=, meta, args} when is_list(args) ->
         {name, _meta, context} = List.last(args)
         {name, meta, context}
@@ -654,6 +697,14 @@ defmodule Inherit do
     [do: quote do
       apply(unquote(parent), unquote(name), [unquote_splicing(args)])
     end]
+  end
+
+  defp underscore(name) when is_atom(name) do
+    underscore(Atom.to_string(name))
+  end
+
+  defp underscore(<<"_"::utf8, name::binary>>) do
+    underscore(name)
   end
 
   defp underscore(name) do
@@ -726,5 +777,12 @@ defmodule Inherit do
     module.__info__(:attributes)
     |> Keyword.get(:"$inherit")
     |> List.first()
+  end
+
+  def merge_from(parent, fields) do
+    struct(parent)
+    |> Map.from_struct()
+    |> Map.to_list()
+    |> Keyword.merge(fields)
   end
 end
