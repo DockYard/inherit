@@ -354,6 +354,9 @@ defmodule Inherit do
               parent_mod = Module.split(parent_mod) |> Enum.map(&String.to_atom/1)
               {:__aliases__, meta, parent_mod}
           end
+
+        other ->
+          other
       end)
 
     quoted_def = quote do
