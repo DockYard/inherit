@@ -1,5 +1,6 @@
 defmodule Foo do
   use GenServer
+  require Logger
 
   # @derive {Inspect, only: [:list]}
   #
@@ -44,10 +45,15 @@ defmodule Foo do
     {:repl, {:list, assigns}, state}
   end
 
+
   def handle_call({:assign, assigns}, _from, state) when is_map(assigns) do
     {:reply, {:map, assigns}, state}
   end
   defoverridable handle_call: 3
+
+  def log(msg) do
+    Logger.info(msg)
+  end
 
   @impl true
   @doc false

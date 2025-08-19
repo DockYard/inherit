@@ -365,6 +365,11 @@ defmodule Inherit do
 
     expr =
       Macro.prewalk(expr, fn
+        {{:., _combinator_meta, [{:__aliases__, _alias_meta, split_module}, name]}, _meta, args} = ast when is_atom(name) and is_list(args) ->
+          define_require(__CALLER__, Module.concat(split_module))
+
+          ast
+
         {name, meta, args} when is_atom(name) and name not in [:., :=] and is_list(args) ->
           case remote_caller(__CALLER__, name, length(List.wrap(args))) do
             {:def, module} ->
@@ -373,17 +378,16 @@ defmodule Inherit do
               {{:., [], [{:__aliases__, [alias: false], split_module}, name]}, meta, args}
               
             {:defmacro, module} ->
+              define_require(__CALLER__, module)
+
               split_module = Module.split(module) |> Enum.map(&String.to_atom(&1))
 
               {{:., [], [{:__aliases__, [alias: false], split_module}, name]}, meta, args}
 
-              put_attribute_lazy(__CALLER__.module, :requires, fn(requires) ->
-                List.insert_at(requires || [], -1, module) |> Enum.uniq()
-              end)
-
             nil ->
               {name, meta, args}
           end
+
 
         other ->
           other
@@ -397,9 +401,7 @@ defmodule Inherit do
     guards = Enum.map(guards, fn(ast) ->
       Macro.prewalk(ast, fn 
         {{:., _module_meta, [{:__aliases__, _alias_meta, split_module}, _name]}, _meta, _args} = ast ->
-          put_attribute_lazy(__CALLER__.module, :requires, fn(requires) ->
-            List.insert_at(requires || [], -1, Module.concat(split_module)) |> Enum.uniq()
-          end)
+          define_require(__CALLER__, Module.concat(split_module))
 
           ast
         {name, meta, args} when is_atom(name) and name not in [:=, :\\, :and, :or, :not] and is_list(args) ->
@@ -412,9 +414,7 @@ defmodule Inherit do
               {name, meta, args}
 
             {module, _macros} ->
-              put_attribute_lazy(__CALLER__.module, :requires, fn(requires) ->
-                List.insert_at(requires || [], -1, module) |> Enum.uniq()
-              end)
+              define_require(__CALLER__, module)
 
               split_module = Module.split(module) |> Enum.map(&String.to_atom(&1))
 
@@ -450,6 +450,12 @@ defmodule Inherit do
         nil
       end
     end
+  end
+
+  defp define_require(caller, module) do
+    put_attribute_lazy(caller.module, :requires, fn(requires) ->
+      List.insert_at(requires || [], -1, module) |> Enum.uniq()
+    end)
   end
 
   @doc """
@@ -658,6 +664,7 @@ defmodule Inherit do
       use Inherit, Inherit.merge_from(unquote(parent), unquote(fields))
       unquote_splicing(parent_ast_quoted)
     end
+    |> debug(__CALLER__)
   end
 
   defp local_private_call?(body, module) do
