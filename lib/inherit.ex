@@ -664,7 +664,6 @@ defmodule Inherit do
       use Inherit, Inherit.merge_from(unquote(parent), unquote(fields))
       unquote_splicing(parent_ast_quoted)
     end
-    |> debug(__CALLER__)
   end
 
   defp local_private_call?(body, module) do
