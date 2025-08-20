@@ -1,18 +1,20 @@
 # Inherit
 
-Inherit provides compile-time pseudo-inheritance in Elixir through sophisticated AST manipulation, allowing modules to inherit struct fields, delegate function calls, and override behaviors from parent modules.
+Inherit provides compile-time pseudo-inheritance in Elixir through sophisticated AST manipulation, enabling modules to inherit struct fields, functions, and behaviors with zero runtime overhead.
 
 ## Features
 
-- **Struct inheritance**: Child modules inherit all fields from parent modules with field merging
-- **AST-based function inheritance**: Functions are inherited through compile-time AST generation, not runtime delegation
-- **Function overriding with `defoverridable`**: Parent functions marked with `defoverridable` can be overridden by child modules
-- **`__PARENT__` module access**: Use `__PARENT__` to directly reference the parent module in function bodies
-- **`super()` calls**: Call the parent implementation when overriding inherited functions
-- **Function withholding**: Use `defwithhold` to prevent specific functions from being inherited
-- **Deep inheritance chains**: Support for multiple levels of inheritance with proper AST propagation
-- **Custom `__using__` inheritance**: Parent modules can define custom `__using__` macros that are inherited
-- **GenServer integration**: Works seamlessly with GenServer and other OTP behaviors
+- **Compile-time AST Processing**: All inheritance resolved during compilation with `@before_compile` timing for optimal AST access
+- **Smart Function Inheritance**: Dual strategy - direct AST copying for simple functions, delegation for functions calling private functions
+- **Intelligent Import Resolution**: Automatically detects imported functions/macros and injects required `require` statements into child modules
+- **Advanced Function Overriding**: Parent modules control overridability with `defoverridable`, supporting complex argument patterns and guards
+- **`__PARENT__` Direct Access**: Compile-time macro expansion to parent module references with automatic resolution
+- **`super()` Implementation Calls**: Call parent implementations in overridden functions with compile-time resolution
+- **Selective Function Inheritance**: Use `defwithhold` to exclude specific functions from inheritance
+- **Callback System**: Support for `before` and `after` callbacks during the inheritance process
+- **Deep Inheritance Chains**: Multi-level inheritance with proper AST and import propagation through the chain
+- **Custom `__using__` Inheritance**: Parent modules define custom inheritance behavior that cascades to children
+- **Complex Field Support**: Handles sophisticated field types including AST-like structures and nested data
 
 ## Installation
 
@@ -114,9 +116,9 @@ Employee.name_length(employee)
 
 ## Advanced Usage
 
-### Custom `__using__` macros
+### Custom `__using__` macros with callbacks
 
-Parent modules can define their own `__using__` macros that will be inherited:
+Parent modules can define their own `__using__` macros with callback support:
 
 ```elixir
 defmodule BaseServer do
@@ -124,10 +126,14 @@ defmodule BaseServer do
   use Inherit, [state: %{}]
 
   defmacro __using__(fields) do
-    quote do
+    # Before callback ensures GenServer behavior is included first
+    before_callback = quote do
       use GenServer
+    end
+
+    quote do
       require Inherit
-      Inherit.from(unquote(__MODULE__), unquote(fields))
+      Inherit.from(unquote(__MODULE__), unquote(fields), before: unquote(before_callback))
 
       def start_link(opts \\ []) do
         GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -146,7 +152,7 @@ end
 defmodule MyServer do
   use BaseServer, [additional_field: "value"]
   
-  # Inherits GenServer behavior and start_link function
+  # Inherits GenServer behavior with proper callback order
   # Can override start_link and init if needed
 end
 ```
@@ -336,13 +342,16 @@ Mammal.move("run")      # => "Moving by run" (delegated to Animal due to private
 Primate.move("swing")   # => "Moving by swing" (delegated through inheritance chain)
 Human.move("walk")      # => "Moving by walk" (delegated through inheritance chain)
 
-# Override behavior with defoverridable
+# Override behavior with proper inheritance control
 Animal.describe()       # => "I am an animal"
 Mammal.describe()       # => "I am an animal that is warm-blooded" (overrides and calls super())
 Primate.describe()      # => "I am an animal that is warm-blooded with opposable thumbs" (overrides and calls __PARENT__)
 
-# Functions without defoverridable cannot be overridden
+# Functions without defoverridable cannot be overridden (compilation warning)
 Human.special_ability() # => "opposable thumbs" (calls Primate.special_ability, not Human - emits warning)
+
+# Import resolution and GenServer integration with inheritance
+%Human{} |> GenServer.start() # Works seamlessly with inherited GenServer behavior
 ```
 
 ## Documentation

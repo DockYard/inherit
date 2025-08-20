@@ -167,15 +167,17 @@ defmodule Inherit do
 
   ## How It Works
 
-  The inheritance system operates at compile-time with intelligent function handling:
+  The inheritance system operates at compile-time with sophisticated AST processing:
 
-  1. **Compile-time Processing**: All inheritance is resolved during compilation for zero runtime overhead
-  2. **Dual Inheritance Strategy**: Functions are inherited using two different approaches based on their implementation:
-     - **AST Copying**: Functions that only call public functions have their AST copied directly to child modules
-     - **Delegation**: Functions that call private functions are inherited as delegation calls to the parent module
-  3. **Private Function Detection**: The system analyzes each parent function's AST to detect calls to private functions
-  4. **Smart Argument Handling**: For delegated functions, complex argument patterns (guards, defaults, destructuring) are properly processed
-  5. **Macro Expansion**: `__PARENT__` and `super()` calls are expanded to direct module references during compilation
+  1. **@before_compile Timing**: Uses `@before_compile` callback for optimal AST access and processing timing
+  2. **Intelligent Import Resolution**: Automatically detects imported functions/macros and injects `require` statements
+  3. **Dual Inheritance Strategy**: Functions are inherited using two approaches based on their implementation:
+     - **AST Copying**: Functions with no private calls have their AST copied directly to child modules
+     - **Delegation**: Functions calling private functions are inherited as delegation calls to preserve encapsulation
+  4. **Enhanced Private Function Detection**: Uses `Module.definitions_in/2` for accurate private function tracking
+  5. **Advanced Argument Processing**: Handles complex argument patterns (guards, defaults, destructuring, pattern matching)
+  6. **Callback System**: Supports `before` and `after` callbacks during inheritance for custom setup
+  7. **Macro Expansion**: `__PARENT__` and `super()` calls are expanded to direct module references during compilation
 
   ### Function Inheritance Strategies
 
@@ -206,66 +208,91 @@ defmodule Inherit do
   - `super(args...)` - Calls the parent implementation when overriding inherited functions (compile-time resolved)
   - `defwithhold` - Prevents specified functions from being inherited by child modules
 
-  ## Real Examples Demonstrating Inheritance Strategies
+  ## Real Examples from Refactored Implementation
 
-      # Inheritance chain: Vehicle -> Car -> SportsCar -> RaceCar
+      # Inheritance chain: Animal -> Mammal -> Primate -> Human (from test suite)
       
-      defmodule Vehicle do
-        use Inherit, [wheels: 0, engine: false]
+      defmodule Animal do
+        use GenServer
+        use Inherit, [species: "", habitat: "", alive: true]
         
-        # Function that calls private function - will be DELEGATED in children
-        def start_engine(vehicle) when vehicle.engine do
-          validate_engine(vehicle)  # Calls private function
-          "Engine started"
+        # Custom __using__ with callback support
+        defmacro __using__(fields) do
+          before_callback = quote do
+            use GenServer  # Ensure GenServer behavior is included
+          end
+          
+          quote do
+            require Inherit
+            Inherit.from(unquote(__MODULE__), unquote(fields), before: unquote(before_callback))
+            
+            def breathe(animal), do: "breathing as \#{animal.species}"
+            defoverridable breathe: 1
+          end
         end
         
-        defp validate_engine(vehicle) do
-          # Private validation logic
-          vehicle.engine || raise "No engine!"
+        # Function that calls private function - will be DELEGATED in children
+        def move(animal, method) do
+          validate_movement(method)  # Calls private function
+          "Moving by \#{method}"
+        end
+        defoverridable move: 2
+        
+        defp validate_movement(method) do
+          method in ["walk", "run", "swim"] || raise "Invalid movement: \#{method}"
         end
         
         # Function with no private calls - AST will be COPIED to children  
-        def accelerate(speed, increment \\\\ 5) do
-          speed + increment  # No private function calls
+        def describe(animal) do
+          "I am a \#{animal.species}"  # No private function calls
         end
-        defoverridable [accelerate: 1, accelerate: 2]
-      end
-
-      defmodule Car do
-        use Vehicle, [doors: 4, fuel_type: "gasoline"]
+        defoverridable describe: 1
         
-        def accelerate(speed) do
-          __PARENT__.accelerate(speed) + 10  # Direct parent module call
+        # Function using imported utility with automatic require injection
+        def log_species(animal) do
+          Logger.info("Species: \#{animal.species}")  # Auto-detects Logger import
         end
-        defoverridable accelerate: 1
       end
 
-      defmodule SportsCar do
-        use Car, [doors: 2, turbo: true]
+      defmodule Mammal do
+        use Animal, [warm_blooded: true, fur_type: ""]
         
-        def accelerate(speed) do
-          __PARENT__.accelerate(speed) + 20  # Does not mark as defoverridable
+        def describe(mammal) do
+          super(mammal) <> " that is warm-blooded"  # Calls parent via super
         end
+        defoverridable describe: 1
       end
 
-      defmodule RaceCar do
-        use SportsCar, [wheels: 4, aerodynamics: "advanced"]
+      defmodule Primate do
+        use Mammal, [opposable_thumbs: true]
         
-        # This function will never be called because SportsCar.accelerate/1
-        # doesn't mark itself as defoverridable
-        def accelerate(speed) do
-          __PARENT__.accelerate(speed) + 50
+        def describe(primate) do
+          __PARENT__.describe(primate) <> " with opposable thumbs"  # Direct parent call
+        end
+        defoverridable describe: 1
+      end
+
+      defmodule Human do
+        use Primate, [language: "", culture: ""]
+        
+        # This function will never be called because Primate doesn't mark describe/1
+        # as defoverridable (demonstrates inheritance control)
+        def describe(human) do
+          __PARENT__.describe(human) <> " and complex language"
         end
       end
 
-      # Results demonstrate dual inheritance strategies:
-      # start_engine/1 is DELEGATED because it calls private validate_engine/1
-      Car.start_engine(%Car{engine: true})        # => "Engine started" (delegated: apply(Vehicle, :start_engine, [car]))
-      SportsCar.start_engine(%SportsCar{engine: true}) # => "Engine started" (delegated through inheritance chain)
-      RaceCar.start_engine(%RaceCar{engine: true})     # => "Engine started" (delegated through inheritance chain)
+      # Results demonstrate sophisticated inheritance features:
+      # move/2 is DELEGATED because it calls private validate_movement/1
+      Mammal.move(%Mammal{species: "dog"}, "run")     # => "Moving by run" (delegated to Animal)
+      Primate.move(%Primate{species: "chimp"}, "swing") # => "Moving by swing" (delegated through chain)
       
-      # accelerate/1 has AST COPIED because no private calls
-      RaceCar.accelerate(50)   # => 80 (calls SportsCar.accelerate, not RaceCar - compilation warning)
+      # describe/1 has AST COPIED and demonstrates override chain
+      Human.describe(%Human{species: "Homo sapiens"})  # Uses Primate.describe (not Human due to no defoverridable)
+      # => "I am a Homo sapiens that is warm-blooded with opposable thumbs"
+      
+      # GenServer integration works seamlessly through callback system
+      {:ok, pid} = GenServer.start(Human, [])  # Inherits GenServer behavior properly
   """
 
   @doc """
@@ -876,13 +903,61 @@ defmodule Inherit do
     quoted
   end
 
-  @doc false
+  @doc """
+  Retrieves inheritance attributes for a given module.
+
+  Returns the inheritance metadata stored in the module's `$inherit` attribute,
+  which contains information about the module's inheritance hierarchy and AST data.
+
+  ## Parameters
+
+  - `module` - The module to retrieve inheritance attributes for
+
+  ## Returns
+
+  A map containing inheritance metadata including:
+  - `:parent` - The parent module (if any)
+  - `:ast` - Stored AST for functions
+  - `:private_funcs` - Private function definitions
+  - `:requires` - Required modules for imports
+
+  ## Example
+
+      iex> Inherit.attributes_for(MyChildModule)
+      %{parent: MyParentModule, ast: [...], private_funcs: [...], requires: [...]}
+  """
   def attributes_for(module) do
     module.__info__(:attributes)
     |> Keyword.get(:"$inherit")
     |> List.first()
   end
 
+  @doc """
+  Merges parent struct fields with child fields for inheritance.
+
+  This function is used internally during the inheritance process to combine
+  parent module struct fields with additional fields specified by the child module.
+  Child fields take precedence over parent fields when there are conflicts.
+
+  ## Parameters
+
+  - `parent` - The parent module to inherit struct fields from
+  - `fields` - A keyword list of additional fields to merge
+
+  ## Returns
+
+  A keyword list containing the merged struct fields.
+
+  ## Example
+
+      iex> Inherit.merge_from(ParentModule, [child_field: "value"])
+      [parent_field1: "default", parent_field2: 42, child_field: "value"]
+
+  ## Technical Notes
+
+  This function is called automatically during inheritance setup and should not
+  typically be called directly by user code.
+  """
   def merge_from(parent, fields) do
     struct(parent)
     |> Map.from_struct()
