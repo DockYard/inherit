@@ -55,4 +55,9 @@ defmodule InheritTest do
     assert 2 == bar.b
     assert %{a: 1, b: {:a, [], [1, 2]}} == bar.c
   end
+
+  test "deep inheritance still runs all ancestor usings" do
+    {:ok, pid} = GenServer.start(Qux, [])
+    assert is_pid(pid)
+  end
 end

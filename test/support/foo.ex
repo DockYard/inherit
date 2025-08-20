@@ -12,18 +12,20 @@ defmodule Foo do
   ]
 
   defmacro __using__(fields) do
-    quote location: :keep do
+    before_callback = quote do
       use GenServer
+    end
+
+    quote location: :keep do
       require Inherit
-      Inherit.from(unquote(__MODULE__), unquote(fields))
+      Inherit.from(unquote(__MODULE__), unquote(fields), before: unquote(before_callback))
 
       def used?, do: true
       defoverridable used?: 0
 
       def init(opts \\ []) do
-        :ignore
+        {:ok, %__MODULE__{}}
       end
-      defwithhold init: 0, init: 1
 
       def incr(val) do
         super(val)  + 1

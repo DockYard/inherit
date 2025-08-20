@@ -331,6 +331,21 @@ defmodule Inherit do
 
   @doc false
   defmacro __before_compile__(env) do
+    ast = get_attribute(env.module, :ast, [])
+
+    ast = 
+      case Module.get_attribute(env.module, :"$inherit:before_callback", []) do
+        [] -> ast
+        before_callback -> [before_callback | ast]
+      end
+
+    ast = 
+      case Module.get_attribute(env.module, :"$inherit:after_callback", []) do
+        [] -> ast
+        after_callback -> [after_callback | ast]
+      end
+
+    put_attribute(env.module, :ast, ast)
     put_attribute(env.module, :private_funcs, Module.definitions_in(env.module, :defp))
   end
 
@@ -621,53 +636,82 @@ defmodule Inherit do
   This macro is automatically called when a module uses another inheritable module.
   It should not be called directly by users - instead use `use ParentModule, fields`.
   """
-  defmacro from(parent, fields) do
-    put_attribute(__CALLER__.module, :parent, parent)
+  defmacro from(parent, fields, quoted_callbacks \\ []) do
+    before_callback = Keyword.get(quoted_callbacks, :before, [])
+    after_callback = Keyword.get(quoted_callbacks, :after, [])
 
-    requires_ast = Enum.map(get_attribute(parent, :requires, []), fn(module) ->
-      quote do
-        require unquote(module)
-      end
-    end)
+    Module.put_attribute(__CALLER__.module, :"$inherit:before_callback", before_callback)
+    Module.put_attribute(__CALLER__.module, :"$inherit:after_callback", after_callback)
 
-    parent_ast_quoted = 
-      get_attribute(parent, :ast, [])
-      |> Enum.map(fn(
-        {:def, name, args, guards, body}) ->
-          {args, body} = if local_private_call?(body, parent) do
-            args = build_func_args(args, guards)
-            body = build_func_body(parent, name, args)
+    if !parent(__CALLER__.module) do
+      put_attribute(__CALLER__.module, :parent, parent)
 
-            {args, body}
-          else
-            {args, body}
-          end
+      parent_requires = get_attribute(parent, :requires, [])
 
-          if Enum.empty?(guards) do
-            quote do
-              Inherit.def unquote(name)(unquote_splicing(args)) do
-                unquote(Keyword.get(body, :do, []))
-              end
-            end
-          else
-            quote do
-              Inherit.def unquote(name)(unquote_splicing(args)) when unquote_splicing(guards) do
-                unquote(Keyword.get(body, :do, []))
-              end
-            end
-          end
-        {:defoverridable, keywords_or_behaviour} ->
-          quote do
-            Inherit.defoverridable unquote(keywords_or_behaviour)
-          end
+      requires_ast = Enum.map(parent_requires, fn(module) ->
+        quote do
+          require unquote(module)
+        end
       end)
 
-    quote do
-      unquote_splicing(requires_ast)
-      use Inherit, Inherit.merge_from(unquote(parent), unquote(fields))
-      unquote_splicing(parent_ast_quoted)
+      put_attribute_lazy(__CALLER__.module, :requires, fn(requires) ->
+        parent_requires ++ List.wrap(requires)
+      end)
+
+      parent_ast =
+        get_attribute(parent, :ast, [])
+        |> Enum.map(fn(
+          {:def, name, args, guards, body}) ->
+            if local_private_call?(body, parent) do
+              args = build_func_args(args, guards)
+              body = build_func_body(parent, name, args)
+
+              {:def, name, args, guards, body}
+            else
+              {:def, name, args, guards, body}
+            end
+          other ->
+            other
+        end)
+
+      parent_ast_quoted = 
+        parent_ast
+        |> Enum.map(fn(
+          {:def, name, args, guards, body}) ->
+            if Enum.empty?(guards) do
+              quote do
+                def unquote(name)(unquote_splicing(args)) do
+                  unquote(Keyword.get(body, :do, []))
+                end
+              end
+            else
+              quote do
+                def unquote(name)(unquote_splicing(args)) when unquote_splicing(guards) do
+                  unquote(Keyword.get(body, :do, []))
+                end
+              end
+            end
+
+          {:defoverridable, keywords_or_behaviour} ->
+            quote do
+              defoverridable unquote(keywords_or_behaviour)
+            end
+
+          other ->
+            other
+        end)
+
+      put_attribute_lazy(__CALLER__.module, :ast, fn(ast) ->
+        parent_ast ++ List.wrap(ast) 
+      end)
+
+      quote do
+        unquote_splicing(requires_ast)
+        use Inherit, Inherit.merge_from(unquote(parent), unquote(fields))
+        unquote_splicing(parent_ast_quoted)
+      end
+        |> debug(__CALLER__, quoted: true)
     end
-      |> debug(__CALLER__, quoted: true)
   end
 
   defp local_private_call?(body, module) do
