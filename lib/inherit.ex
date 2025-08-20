@@ -710,7 +710,6 @@ defmodule Inherit do
         use Inherit, Inherit.merge_from(unquote(parent), unquote(fields))
         unquote_splicing(parent_ast_quoted)
       end
-        |> debug(__CALLER__, quoted: true)
     end
   end
 
@@ -854,7 +853,10 @@ defmodule Inherit do
   def debug(quoted, caller, opts \\ []) do
     body = Macro.expand(quoted, caller)
 
-    <<"Elixir.", name::binary>> = Atom.to_string(caller.module)
+    name =
+      Module.split(caller.module)
+      |> List.last()
+
     file_name = "#{Macro.underscore(name)}.ex"
 
     content = if Keyword.get(opts, :quoted) do
@@ -868,6 +870,7 @@ defmodule Inherit do
       |> Code.format_string!()
     end
 
+    File.mkdir(".inheritdebug/")
     File.write(".inheritdebug/#{file_name}", content)
 
     quoted
