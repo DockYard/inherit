@@ -74,6 +74,16 @@ defmodule Foo do
   end
   defwithhold init: 0, init: 1
 
+  def func_head(a, b \\ true, c \\ true)
+
+  def func_head(true, b, c) do
+    b && c
+  end
+
+  def func_head(false, b, c) do
+    !b && !c
+  end
+
   def incr(val, by \\ 1) when is_integer(val) do
     val  + by
   end

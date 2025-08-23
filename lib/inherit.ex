@@ -387,56 +387,64 @@ defmodule Inherit do
     {{name, _meta, args}, guards} = :elixir_utils.extract_guards(call)
 
     expr = 
-      Macro.prewalk(expr, fn
-        {:__PARENT__, meta, nil} ->
-          case parent(__CALLER__.module) do
-            nil ->
-              raise "Cannot call __PARENT__ within #{__CALLER__.module} as it is the root ancestor."
-            parent_mod ->
-              parent_mod = Module.split(parent_mod) |> Enum.map(&String.to_atom/1)
-              {:__aliases__, meta, parent_mod}
-          end
+      if expr do
+        Macro.prewalk(expr, fn
+          {:__PARENT__, meta, nil} ->
+            case parent(__CALLER__.module) do
+              nil ->
+                raise "Cannot call __PARENT__ within #{__CALLER__.module} as it is the root ancestor."
+              parent_mod ->
+                parent_mod = Module.split(parent_mod) |> Enum.map(&String.to_atom/1)
+                {:__aliases__, meta, parent_mod}
+            end
 
-        other ->
-          other
-      end)
+          other ->
+            other
+        end)
+      else
+        expr
+      end
 
     quoted_def = quote do
       Kernel.def(unquote(call), unquote(expr))
     end
 
     expr =
-      Macro.prewalk(expr, fn
-        {{:., _combinator_meta, [{:__aliases__, _alias_meta, [:Kernel]}, _name]}, _meta, _args} = ast ->
-          ast
+      if expr do
+        Macro.prewalk(expr, fn
+          {{:., _combinator_meta, [{:__aliases__, _alias_meta, [:Kernel]}, _name]}, _meta, _args} = ast ->
+            ast
 
-        {{:., _combinator_meta, [{:__aliases__, _alias_meta, split_module}, name]}, _meta, args} = ast when is_atom(name) and is_list(args) ->
-          define_require(__CALLER__, Module.concat(split_module))
+          {{:., _combinator_meta, [{:__aliases__, _alias_meta, split_module}, name]}, _meta, args} = ast when is_atom(name) and is_list(args) ->
+            define_require(__CALLER__, Module.concat(split_module))
 
-          ast
+            ast
 
-        {name, meta, args} when is_atom(name) and name not in [:., :=, :/] and is_list(args) ->
-          case remote_caller(__CALLER__, name, length(List.wrap(args))) do
-            {:def, module} ->
-              split_module = Module.split(module) |> Enum.map(&String.to_atom(&1))
+          {name, meta, args} when is_atom(name) and name not in [:., :=, :/] and is_list(args) ->
+            case remote_caller(__CALLER__, name, length(List.wrap(args))) do
+              {:def, module} ->
+                split_module = Module.split(module) |> Enum.map(&String.to_atom(&1))
 
-              {{:., [], [{:__aliases__, [alias: false], split_module}, name]}, meta, args}
-              
-            {:defmacro, module} ->
-              define_require(__CALLER__, module)
+                {{:., [], [{:__aliases__, [alias: false], split_module}, name]}, meta, args}
+                
+              {:defmacro, module} ->
+                define_require(__CALLER__, module)
 
-              split_module = Module.split(module) |> Enum.map(&String.to_atom(&1))
+                split_module = Module.split(module) |> Enum.map(&String.to_atom(&1))
 
-              {{:., [], [{:__aliases__, [alias: false], split_module}, name]}, meta, args}
+                {{:., [], [{:__aliases__, [alias: false], split_module}, name]}, meta, args}
 
-            nil ->
-              {name, meta, args}
-          end
+              nil ->
+                {name, meta, args}
+            end
 
 
-        other ->
-          other
-      end)
+          other ->
+            other
+        end)
+      else
+        nil
+      end
 
     args = case args do
       args when is_list(args) -> args
@@ -565,7 +573,7 @@ defmodule Inherit do
     available_funcs =
       get_attribute(__CALLER__.module, :ast, [])
       |> Enum.reduce([], fn
-        {:def, name, args, _guards, _body}, funcs -> 
+        {:def, name, args, _guards, _expr}, funcs -> 
           arity = length(args)
 
           defaults = Enum.count(args, fn
@@ -688,14 +696,14 @@ defmodule Inherit do
       parent_ast =
         get_attribute(parent, :ast, [])
         |> Enum.map(fn(
-          {:def, name, args, guards, body}) ->
-            if local_private_call?(body, parent) do
+          {:def, name, args, guards, expr}) ->
+            if local_private_call?(expr, parent) do
               args = build_func_args(args, guards)
-              body = build_func_body(parent, name, args)
+              expr = build_func_expr(parent, name, args)
 
-              {:def, name, args, guards, body}
+              {:def, name, args, guards, expr}
             else
-              {:def, name, args, guards, body}
+              {:def, name, args, guards, expr}
             end
           other ->
             other
@@ -703,19 +711,25 @@ defmodule Inherit do
 
       parent_ast_quoted = 
         parent_ast
-        |> Enum.map(fn(
-          {:def, name, args, guards, body}) ->
-            if Enum.empty?(guards) do
+        |> Enum.map(fn
+          {:def, name, args, guards, expr} ->
+            call =
+              case guards do
+                [] -> 
+                  {name, [], args}
+                _ -> 
+                  {:when, [], [{name, [], args}, {:__block__, [], guards}]}
+              end
+
+            if expr do
               quote do
-                def unquote(name)(unquote_splicing(args)) do
-                  unquote(Keyword.get(body, :do, []))
+                def unquote(call) do
+                  unquote(Keyword.get(expr, :do, []))
                 end
               end
             else
               quote do
-                def unquote(name)(unquote_splicing(args)) when unquote_splicing(guards) do
-                  unquote(Keyword.get(body, :do, []))
-                end
+                def unquote(call)
               end
             end
 
@@ -740,10 +754,14 @@ defmodule Inherit do
     end
   end
 
-  defp local_private_call?(body, module) do
+  defp local_private_call?(nil, _module) do
+    false
+  end
+
+  defp local_private_call?(expr, module) do
     private_funcs = get_attribute(module, :private_funcs)
 
-    {_ast, private_call?} = Macro.prewalk(body, false, fn
+    {_ast, private_call?} = Macro.prewalk(expr, false, fn
       {name, _meta, nil} = ast, bool when is_atom(name) ->
         {ast, bool}
       {name, _meta, args} = ast, bool when is_atom(name) and is_list(args) ->
@@ -805,7 +823,7 @@ defmodule Inherit do
     end)
   end
 
-  defp build_func_body(parent, name, args) do
+  defp build_func_expr(parent, name, args) do
     args = Enum.map(args, fn
       {:\\, _meta, [arg, _value]}-> arg
       {:=, meta, args} when is_list(args) ->
