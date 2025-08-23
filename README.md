@@ -23,7 +23,7 @@ Add `inherit` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:inherit, "~> 0.4.0"}
+    {:inherit, "~> 0.4.2"}
   ]
 end
 ```
